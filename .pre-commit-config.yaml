@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0 # Get the latest from: https://github.com/pre-commit/pre-commit-hooks/releases
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.(md)$
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-json
+        files: \.(json)$
+      - id: check-yaml
+        files: \.(yaml|yml)$
+  #######################
+  # Golang related
+  #######################
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-imports
+      - id: go-mod-tidy

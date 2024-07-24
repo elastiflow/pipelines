@@ -1,0 +1,16 @@
+name: Go checks
+concurrency:
+  group: go-checks-${{ github.ref }}
+  cancel-in-progress: true
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  go_checks:
+    name: Go checks
+    uses: elastiflow/gha-reusable-workflows/.github/workflows/reusable_go_checks.yml@v0

@@ -1,0 +1,10 @@
+# Misc
+.DS_Store
+tmp.*
+
+# IDE
+.idea
+.vscode
+
+# Output of the go coverage tool
+*.out

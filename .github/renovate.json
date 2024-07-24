@@ -1,0 +1,16 @@
+{
+  "dependencyDashboard": true,
+  "automerge": false,
+  "extends": [
+    "config:recommended"
+  ],
+  "schedule": [
+    "before 4am on the first day of the month"
+  ],
+  "reviewers": [
+    "team:ops"
+  ],
+  "terraform": {
+    "rangeStrategy": "bump"
+  }
+}
