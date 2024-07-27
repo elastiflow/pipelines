@@ -13,3 +13,16 @@ test-verbose: test
 .PHONY: report-coverage
 report-coverage:
 	@go tool cover -func=${GO_TEST_COVERAGE_PROFILE} | grep total
+
+
+scan\:sbom:
+	trivy fs --format cyclonedx .
+
+scan\:sca:
+	trivy fs .
+
+scan\:sast:
+	semgrep scan --config p/ci && gosec -terse -severity high ./...
+
+scan\:license:
+	trivy fs --scanners license --license-full .
