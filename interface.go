@@ -10,10 +10,10 @@ type Event interface {
 type PacketEvent interface {
 	Event
 	ToPacket() error
-	Addr() *net.UDPAddr
+	Addr() net.Addr
 }
 
-type Pipeline[T Event] interface {
-	Open() <-chan T
+type Pipeline interface {
+	Open() <-chan Event
 	Close() error
 }
