@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/elastiflow/pipelines"
+	customprocs "github.com/elastiflow/pipelines/examples/custom/procs"
 	"github.com/elastiflow/pipelines/pipes"
 	"github.com/elastiflow/pipelines/procs"
 )
@@ -15,14 +16,16 @@ type pipeline struct {
 	errorChan  chan<- error
 	inputChan  <-chan pipelines.Event
 	fanNum     uint16
+	filter     map[string]bool
 	cancelFunc context.CancelFunc
 }
 
-func New(inputChan <-chan pipelines.Event, errChan chan<- error, fanNum uint16) pipelines.Pipeline {
+func New(inChan <-chan pipelines.Event, errChan chan<- error, f map[string]bool, fanNum uint16) pipelines.Pipeline {
 	return &pipeline{
-		inputChan: inputChan,
+		inputChan: inChan,
 		errorChan: errChan,
 		fanNum:    fanNum,
+		filter:    f,
 	}
 }
 
@@ -39,8 +42,7 @@ func (p *pipeline) Close() error {
 }
 
 func (p *pipeline) pipe(ctx context.Context) <-chan pipelines.Event {
-	addrFilter := map[string]bool{"127.0.0.1:65000": true}
-	toSnmpPackets := procs.FanOut(ctx, p.inputChan, p.errorChan, procs.ToSNMPPacket, pipelines.NewProps(pipelines.Packet), p.fanNum)
-	filterPacketAddr := procs.Filter(ctx, pipes.FanIn(ctx, toSnmpPackets...), p.errorChan, pipelines.NewPacketProps(addrFilter))
-	return filterPacketAddr
+	packets := procs.FanOut(ctx, p.inputChan, p.errorChan, customprocs.ToPacketFilter, pipelines.NewProps(pipelines.Packet), p.fanNum)
+	filteredPackets := procs.Filter(ctx, pipes.FanIn(ctx, packets...), p.errorChan, pipelines.NewPacketProps(p.filter))
+	return filteredPackets
 }

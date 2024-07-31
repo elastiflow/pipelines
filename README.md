@@ -1,25 +1,72 @@
-- [Overview](#overview)
-- [Repo settings](#repo-settings)
+# Pipelines
 
-## Overview
-Use this repo as a [template repo for new Go modules](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template)
-* Please module change the `module_template` name in the `go.mod` and `example_test.go`
-* Please add some description on what/how module should be used for
-* Add some "honorable" notes if any
-* Please add some examples to the `examples`
+The `pipelines` module is a Go library designed to facilitate the creation and management of data processing pipelines. It provides a set of tools for flow control, error handling, and pipeline processes.
 
-## Repo settings
-Please don't forget to set following properties in the repo settings and drop this section right after.
-* Allow "Allow squash merging" only in the "General settings"
-* Check the "Always suggest updating pull request branches" option in the "General" settings
-* Check the "Automatically delete head branches" option in the "General" settings
-* Add `Ops` team with "Admin" permissions
-* Add `Centaur` team with "Maintain" permissions
-* Add `main` branch protection rules in "Branches":
-  * "Require a pull request before merging"
-  * "Require approvals"
-  * "Dismiss stale pull request approvals when new commits are pushed"
-  * "Require status checks to pass before merging"
-  * "Require conversation resolution before merging"
-  * "Require linear history"
-  * "Do not allow bypassing the above settings"
+## Directory Structure
+
+- **pipes/**: Contains functions used for flow control purposes.
+- **procs/**: Contains functions used for pipeline processes, including error handling and a `props` struct.
+- **examples/**: Contains example implementations of pipelines.
+
+## Installation
+
+To install the `pipelines` module, use the following command:
+
+```sh
+go get github.com/elastiflow/pipelines
+```
+
+## Usage
+
+### Flow Control (`pipes`)
+
+The `pipes` package provides functions to control the flow of data through the pipeline. These functions help in managing the data streams and ensuring that data is processed in the correct order.
+
+### Pipeline Processes (`procs`)
+
+The `procs` package contains functions that define the processes within the pipeline. This includes error handling mechanisms and the `props` struct, which is used to pass properties and configurations to the processes.
+
+### Example Implementation
+
+The `examples` folder contains a simple example of how to implement a pipeline using the `pipelines` module. Below is a brief overview of implementation a pipeline:
+
+1. **Implement pipelines.Event**: Create a struct that implements `pipelines.Event`.
+2. **Implement pipelines.Pipeline**" Create a struct that implements `pipelines.Pipeline` with a construction `New`.
+3. **Constructing the Pipeline**: Make IO channels and use the `pipeline.New` function to create a new pipeline instance.
+4. **Starting the Pipeline**: Open the pipeline and start processing events.
+5. **Error Handling**: Use a goroutine to handle errors and close the pipeline if an error occurs.
+
+Here is a snippet from the example implementation:
+
+```go
+package simple
+
+import (
+ "log/slog"
+
+ "github.com/elastiflow/pipelines"
+ "github.com/elastiflow/pipelines/examples/simple/pipeline"
+)
+
+func main() {
+ // Create IO channels and construct the pipeline
+ inChan := make(chan pipelines.Event)
+ errChan := make(chan error)
+ defer func() {
+  close(inChan)
+  close(errChan)
+ }()
+ pl := pipeline.New(inChan, errChan, 3)
+	// Start a pipeline error handler
+ go func(ch <-chan error) {
+  for err := range ch {
+   slog.Error("received error: ", slog.Any("error", err))
+   pl.Close() // Close the pipeline on error, which breaks the pipeline loop below
+  }
+ }(errChan)
+ // Open the pipeline and log output events
+ for event := range pl.Open() {
+  slog.Info("received event: ", slog.Any("event", event))
+ }
+}
+```
