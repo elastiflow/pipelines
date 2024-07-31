@@ -1,4 +1,4 @@
-package event
+package pipes
 
 import (
 	"context"
@@ -6,11 +6,11 @@ import (
 	"testing"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/pipes/event/mocks"
+	"github.com/elastiflow/pipelines/mocks"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFanIn(t *testing.T) {
+func TestBridge(t *testing.T) {
 	tests := []struct {
 		name      string
 		input     [][]pipelines.Event
@@ -53,24 +53,29 @@ func TestFanIn(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			var inputStreams []<-chan pipelines.Event
-			for _, stream := range tt.input {
-				eventStream := make(chan pipelines.Event, len(stream))
-				for _, event := range stream {
-					eventStream <- event
+			inputStream := make(chan (<-chan pipelines.Event))
+			outputStream := Bridge(ctx, inputStream)
+			go func() {
+				defer close(inputStream)
+				for _, stream := range tt.input {
+					eventStream := make(chan pipelines.Event, len(stream))
+					for _, event := range stream {
+						eventStream <- event
+					}
+					close(eventStream)
+					inputStream <- eventStream
 				}
-				close(eventStream)
-				inputStreams = append(inputStreams, eventStream)
-			}
+			}()
 			if tt.cancelCtx {
 				cancel()
 			}
-			outputStream := FanIn(ctx, inputStreams...)
-			var got []pipelines.Event
+			got := []pipelines.Event{}
 			for event := range outputStream {
-				got = append(got, event)
+				if event != nil {
+					got = append(got, event)
+				}
 			}
-			assert.Equal(t, tt.want, got)
+			assert.ElementsMatch(t, tt.want, got)
 		})
 	}
 }

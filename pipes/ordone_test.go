@@ -1,4 +1,4 @@
-package event
+package pipes
 
 import (
 	"context"
@@ -6,25 +6,23 @@ import (
 	"testing"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/pipes/event/mocks"
+	"github.com/elastiflow/pipelines/mocks"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFanOut(t *testing.T) {
+func TestOrDone(t *testing.T) {
 	tests := []struct {
 		name      string
 		input     []pipelines.Event
-		numOut    int
 		want      []pipelines.Event
 		cancelCtx bool
 	}{
 		{
-			name: "single output channel",
+			name: "no context cancel",
 			input: []pipelines.Event{
 				mocks.NewMockEvent("1", 1, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1)}),
 				mocks.NewMockEvent("2", 2, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 2)}),
 			},
-			numOut: 1,
 			want: []pipelines.Event{
 				mocks.NewMockEvent("1", 1, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1)}),
 				mocks.NewMockEvent("2", 2, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 2)}),
@@ -32,17 +30,12 @@ func TestFanOut(t *testing.T) {
 			cancelCtx: false,
 		},
 		{
-			name: "multiple output channels",
+			name: "context canceled",
 			input: []pipelines.Event{
 				mocks.NewMockEvent("1", 1, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1)}),
-				mocks.NewMockEvent("2", 2, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 2)}),
 			},
-			numOut: 2,
-			want: []pipelines.Event{
-				mocks.NewMockEvent("1", 1, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1)}),
-				mocks.NewMockEvent("2", 2, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 2)}),
-			},
-			cancelCtx: false,
+			want:      []pipelines.Event{},
+			cancelCtx: true,
 		},
 	}
 
@@ -60,21 +53,14 @@ func TestFanOut(t *testing.T) {
 			if tt.cancelCtx {
 				cancel()
 			}
-			testPipe := func(ctx context.Context, eventStream <-chan pipelines.Event) <-chan pipelines.Event {
-				return eventStream
-			}
-			outputStreams := FanOut(ctx, eventStream, testPipe, uint16(tt.numOut))
-			if len(outputStreams) != tt.numOut {
-				t.Errorf("expected %d output streams, got %d", tt.numOut, len(outputStreams))
-				return
-			}
-			var got []pipelines.Event
-			for _, outputStream := range outputStreams {
-				for event := range outputStream {
+			outputStream := OrDone(ctx, eventStream)
+			got := []pipelines.Event{}
+			for event := range outputStream {
+				if event != nil {
 					got = append(got, event)
 				}
 			}
-			assert.Equal(t, tt.want, got)
+			assert.ElementsMatch(t, tt.want, got)
 		})
 	}
 }

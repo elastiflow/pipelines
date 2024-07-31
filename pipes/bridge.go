@@ -1,4 +1,4 @@
-package event
+package pipes
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 // Bridge destructures a channel of channels into a simple channel allowing
 //
-//	for use the channel of channels from within a single range statement
+//	for use of the channel of channels from within a single range statement
 func Bridge(
 	ctx context.Context,
 	eventStreams <-chan <-chan pipelines.Event,

@@ -2,9 +2,15 @@ package pipelines
 
 import "net"
 
-type Event interface {
+type identifier interface {
 	Key() uint64
 	ID() string
+}
+
+type Event interface {
+	identifier
+	Unmarshal(data []byte, dataType string) error
+	Marshal(dataType string) ([]byte, error)
 }
 
 type PacketEvent interface {

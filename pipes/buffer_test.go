@@ -1,4 +1,4 @@
-package event
+package pipes
 
 import (
 	"context"
@@ -6,37 +6,38 @@ import (
 	"testing"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/pipes/event/mocks"
+	"github.com/elastiflow/pipelines/mocks"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTake(t *testing.T) {
+func TestBuffer(t *testing.T) {
 	tests := []struct {
 		name      string
 		input     []pipelines.Event
-		num       uint16
+		size      uint16
 		want      []pipelines.Event
 		cancelCtx bool
 	}{
 		{
-			name: "take 1 event",
+			name: "buffer size 1",
 			input: []pipelines.Event{
 				mocks.NewMockEvent("1", 1, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1)}),
 				mocks.NewMockEvent("2", 2, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 2)}),
 			},
-			num: 1,
+			size: 1,
 			want: []pipelines.Event{
 				mocks.NewMockEvent("1", 1, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1)}),
+				mocks.NewMockEvent("2", 2, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 2)}),
 			},
 			cancelCtx: false,
 		},
 		{
-			name: "take 2 events",
+			name: "buffer size 2",
 			input: []pipelines.Event{
 				mocks.NewMockEvent("1", 1, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1)}),
 				mocks.NewMockEvent("2", 2, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 2)}),
 			},
-			num: 2,
+			size: 2,
 			want: []pipelines.Event{
 				mocks.NewMockEvent("1", 1, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1)}),
 				mocks.NewMockEvent("2", 2, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 2)}),
@@ -49,24 +50,24 @@ func TestTake(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			eventStream := make(chan pipelines.Event)
-			go func(eventSender chan<- pipelines.Event) {
-				defer close(eventSender)
+			eventStream := make(chan pipelines.Event, len(tt.input))
+			outputStream := Buffer(ctx, eventStream, tt.size)
+			go func() {
+				defer close(eventStream)
 				for _, event := range tt.input {
-					eventSender <- event
+					eventStream <- event
 				}
-			}(eventStream)
+			}()
 			if tt.cancelCtx {
 				cancel()
 			}
-			outputStream := Take(ctx, eventStream, tt.num)
 			var got []pipelines.Event
 			for event := range outputStream {
 				if event != nil {
 					got = append(got, event)
 				}
 			}
-			assert.Equal(t, tt.want, got)
+			assert.ElementsMatch(t, tt.want, got)
 		})
 	}
 }

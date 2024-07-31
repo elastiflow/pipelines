@@ -1,4 +1,4 @@
-package event
+package procs
 
 import (
 	"context"
@@ -6,15 +6,15 @@ import (
 	"testing"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/pipes/event/mocks"
+	"github.com/elastiflow/pipelines/mocks"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestToPacket(t *testing.T) {
+func TestToSNMPPacket(t *testing.T) {
 	tests := []struct {
 		name      string
 		input     []pipelines.Event
-		want      []pipelines.PacketEvent
+		want      []pipelines.Event
 		cancelCtx bool
 	}{
 		{
@@ -23,7 +23,7 @@ func TestToPacket(t *testing.T) {
 				mocks.NewMockPacketEvent("1", 1, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1)}),
 				mocks.NewMockPacketEvent("2", 2, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 2)}),
 			},
-			want: []pipelines.PacketEvent{
+			want: []pipelines.Event{
 				mocks.NewMockPacketEvent("1", 1, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1)}),
 				mocks.NewMockPacketEvent("2", 2, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 2)}),
 			},
@@ -36,8 +36,10 @@ func TestToPacket(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			eventStream := make(chan pipelines.Event, len(tt.input))
+			errStream := make(chan error)
 			go func() {
 				defer close(eventStream)
+				defer close(errStream)
 				for _, event := range tt.input {
 					eventStream <- event
 				}
@@ -45,12 +47,12 @@ func TestToPacket(t *testing.T) {
 			if tt.cancelCtx {
 				cancel()
 			}
-			outputStream := ToPacket(ctx, eventStream)
-			var got []pipelines.PacketEvent
+			outputStream := ToSNMPPacket(ctx, eventStream, errStream, pipelines.NewProps(pipelines.Packet))
+			var got []pipelines.Event
 			for event := range outputStream {
 				got = append(got, event)
 			}
-			assert.Equal(t, tt.want, got)
+			assert.ElementsMatch(t, tt.want, got)
 		})
 	}
 }
