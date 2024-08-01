@@ -42,7 +42,19 @@ func (p *pipeline) Close() error {
 }
 
 func (p *pipeline) pipe(ctx context.Context) <-chan pipelines.Event {
-	packets := procs.FanOut(ctx, p.inputChan, p.errorChan, customprocs.ToPacketFilter, pipelines.NewProps(pipelines.Packet), p.fanNum)
-	filteredPackets := procs.Filter(ctx, pipes.FanIn(ctx, packets...), p.errorChan, pipelines.NewPacketProps(p.filter))
+	packets := procs.FanOut(
+		ctx,
+		p.inputChan,
+		p.errorChan,
+		customprocs.ToPacketFilter,
+		pipelines.NewProps(pipelines.Packet),
+		p.fanNum,
+	)
+	filteredPackets := procs.Filter(
+		ctx,
+		pipes.FanIn(ctx, packets...),
+		p.errorChan,
+		pipelines.NewPacketProps(p.filter),
+	)
 	return filteredPackets
 }
