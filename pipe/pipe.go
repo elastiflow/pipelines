@@ -3,7 +3,7 @@ package pipe
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand" // nosemgrep
 	"sync"
 	"time"
 )
@@ -124,7 +124,8 @@ func (p Pipe[T]) FanOut(
 	nextPipe, outChannels := p.next(FanOut, *params)
 	go func(inStream <-chan T, outStreams senders[T]) {
 		defer outChannels.Close()
-		r := rand.New(rand.NewSource(time.Now().UnixNano()))
+		// Generate a weak random int ONLY to use in load balancing between outStreams
+		r := rand.New(rand.NewSource(time.Now().UnixNano())) // #nosec G404
 		for val := range inStream {
 			select {
 			case outStreams[r.Intn(len(outStreams))] <- val:
