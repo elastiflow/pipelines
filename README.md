@@ -2,71 +2,92 @@
 
 The `pipelines` module is a Go library designed to facilitate the creation and management of data processing pipelines. It provides a set of tools for flow control, error handling, and pipeline processes.
 
-## Directory Structure
+## Setup
 
-- **pipes/**: Contains functions used for flow control purposes.
-- **procs/**: Contains functions used for pipeline processes, including error handling and a `props` struct.
-- **examples/**: Contains example implementations of pipelines.
+To get started with the `pipelines` module, follow these steps:
 
-## Installation
+* Get the `pipelines` module:
+    ```sh
+    go get github.com/yourusername/pipelines
+    ```
 
-To install the `pipelines` module, use the following command:
+## Pipeline
 
-```sh
-go get github.com/elastiflow/pipelines
-```
+A pipeline is a series of data processing stages connected by channels. Each stage (pipe.Pipe) is a function that performs a specific task and passes its output to the next stage. The `pipelines` module provides a flexible way to define and manage these stages.
 
-## Usage
+## Pipe
 
-### Flow Control (`pipes`)
+The `pipe.Pipe` struct is the core of the `pipelines` module. It manages the flow of data through the pipeline stages and handles errors according to the provided parameters.
 
-The `pipes` package provides functions to control the flow of data through the pipeline. These functions help in managing the data streams and ensuring that data is processed in the correct order.
+### Key Components
 
-### Pipeline Processes (`procs`)
+- **Params**: Used to pass arguments into `Pipe` methods.
+- **ProcessFunc**: A user-defined function type used in a given `Pipe` stage.
+- **ProcessRegistry**: Enables the extension of `pipe.Pipe` with user-defined methods.
 
-The `procs` package contains functions that define the processes within the pipeline. This includes error handling mechanisms and the `props` struct, which is used to pass properties and configurations to the processes.
+### Examples
 
-### Example Implementation
+Below are examples of how to use the `pipelines` module to create simple pipelines.
 
-The `examples` folder contains a simple example of how to implement a pipeline using the `pipelines` module. Below is a brief overview of implementation a pipeline:
+#### Squaring Numbers
 
-1. **Implement pipelines.Event**: Create a struct that implements `pipelines.Event`.
-2. **Implement pipelines.Pipeline**" Create a struct that implements `pipelines.Pipeline` with a construction `New`.
-3. **Constructing the Pipeline**: Make IO channels and use the `pipeline.New` function to create a new pipeline instance.
-4. **Starting the Pipeline**: Open the pipeline and start processing events.
-5. **Error Handling**: Use a goroutine to handle errors and close the pipeline if an error occurs.
-
-Here is a snippet from the example implementation:
+This example demonstrates how to set up a pipeline that takes a stream of integers, squares each integer, and outputs the results.
 
 ```go
-package simple
+package main
 
 import (
- "log/slog"
+	"fmt"
+	"log/slog"
 
- "github.com/elastiflow/pipelines"
- "github.com/elastiflow/pipelines/examples/simple/pipeline"
+	"github.com/elastiflow/pipelines"
+	"github.com/elastiflow/pipelines/pipe"
 )
 
+// squareNumbers is a user defined pipe.Pipe function that squares an integer, will be registered and used in a pipe.Pipe.
+func squareOdds(v int) (int, error) {
+	if v%2 == 0 {
+		return v, fmt.Errorf("even number error: %v", v)
+	}
+	return v * v, nil
+}
+
+// exProcess is a generic user defined pipelines.Pipeline function comprised of pipe.Pipe stages that will run in a pipelines.Pipeline.
+func exProcess[T any](p pipe.Pipe[T], params *pipe.Params) pipe.Pipe[T] {
+	return p.OrDone(nil).FanOut(params).Run("squareOdds", nil)
+}
+
 func main() {
- // Create IO channels and construct the pipeline
- inChan := make(chan pipelines.Event)
- errChan := make(chan error)
- defer func() {
-  close(inChan)
-  close(errChan)
- }()
- pl := pipeline.New(inChan, errChan, 3)
-	// Start a pipeline error handler
- go func(ch <-chan error) {
-  for err := range ch {
-   slog.Error("received error: ", slog.Any("error", err))
-   pl.Close() // Close the pipeline on error, which breaks the pipeline loop below
-  }
- }(errChan)
- // Open the pipeline and log output events
- for event := range pl.Open() {
-  slog.Info("received event: ", slog.Any("event", event))
- }
+	// Setup channels and cleanup
+	inChan := make(chan int) 
+	errChan := make(chan error, 10)
+	defer func() {
+		close(inChan)
+		close(errChan)
+	}()
+	// Create new Pipeline properties
+	props := pipelines.NewProps[int]( 
+		pipe.ProcessRegistry[int]{
+			"squareOdds": squareOdds,
+		},
+		inChan,
+		errChan,
+		2,
+	)
+	// Create a new Pipeline
+	pl := pipelines.New[int](props, exProcess[int]) 
+	go func(errReceiver <-chan error) {             // Handle Pipeline errors
+		defer pl.Close()
+		for err := range errReceiver {
+			if err != nil {
+				slog.Error("demo error: " + err.Error())
+				// return // if you wanted to close the pipeline during error handling.
+			}
+		}
+	}(errChan)
+	// Read Pipeline output
+	for out := range pl.Open(nil) { 
+		slog.Info("received simple pipeline output", slog.Int("out", out))
+	}
 }
 ```
