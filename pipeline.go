@@ -2,7 +2,6 @@ package pipelines
 
 import (
 	"context"
-	"time"
 
 	"github.com/elastiflow/pipelines/pipe"
 )
@@ -14,7 +13,6 @@ type ProcessFunc[T any] func(pipe.Pipe[T], *pipe.Params) pipe.Pipe[T]
 type Pipeline[T any] struct {
 	process      ProcessFunc[T]
 	pipeRegistry pipe.ProcessRegistry[T]
-	startTime    time.Time
 	errorChan    chan<- error // Streams errors from the Pipeline to the caller
 	inputChan    <-chan T     // Streams input data to the Pipeline for processing
 	fanNum       int
