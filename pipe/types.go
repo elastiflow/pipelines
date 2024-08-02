@@ -7,6 +7,10 @@ type Params struct {
 	SkipError  bool
 }
 
+func NoParams() *Params {
+	return &Params{}
+}
+
 // ProcessFunc is a user defined function type used in a given Pipe stage
 type ProcessFunc[T any] func(T) (T, error)
 

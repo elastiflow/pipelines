@@ -16,7 +16,14 @@ func squareOdds(v int) (int, error) {
 }
 
 func exProcess[T any](p pipe.Pipe[T], params *pipe.Params) pipe.Pipe[T] {
-	return p.OrDone(nil).FanOut(params).Run("squareOdds", nil)
+	return p.OrDone(
+		pipe.NoParams(),
+	).FanOut(
+		params,
+	).Run(
+		"squareOdds",
+		pipe.NoParams(),
+	)
 }
 
 func seedPipeline(inChan chan<- int) {

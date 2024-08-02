@@ -8,7 +8,7 @@ import (
 )
 
 func duplicateProcess[T any](p pipe.Pipe[T], params *pipe.Params) pipe.Pipe[T] {
-	return p.Broadcast(params).FanIn(nil) // Broadcasting by X then Fanning In will create X duplicates per T.
+	return p.Broadcast(params).FanIn(pipe.NoParams()) // Broadcasting by X then Fanning In will create X duplicates per T.
 }
 
 func seedPipeline(inChan chan<- int) {

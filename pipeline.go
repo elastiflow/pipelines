@@ -43,7 +43,7 @@ func (p *Pipeline[T]) Open(params *pipe.Params) <-chan T {
 	return p.process(
 		pipe.New[T](ctx, p.pipeRegistry, p.inputChan, p.errorChan),
 		params,
-	).Consume()
+	).Out()
 }
 
 // Tee a Pipeline with a given set of parameters and return two output channels with copied data
@@ -57,7 +57,7 @@ func (p *Pipeline[T]) Tee(params *pipe.Params) (<-chan T, <-chan T) {
 		pipe.New[T](ctx, p.pipeRegistry, p.inputChan, p.errorChan),
 		params,
 	).Tee(params)
-	return out1.Consume(), out2.Consume()
+	return out1.Out(), out2.Out()
 }
 
 // Close a Pipeline and safely stop processing

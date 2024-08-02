@@ -36,8 +36,8 @@ func (p Pipe[T]) Register(name string, process ProcessFunc[T]) {
 	p.processRegister[name] = process
 }
 
-// Consume the data outputted from a Pipe
-func (p Pipe[T]) Consume() <-chan T {
+// Out the data outputted from a Pipe
+func (p Pipe[T]) Out() <-chan T {
 	if len(p.inStreams) == 1 {
 		return p.inStreams[0]
 	}
