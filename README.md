@@ -54,14 +54,14 @@ func squareOdds(v int) (int, error) {
 
 // exProcess is a generic user defined pipelines.Pipeline function comprised of pipe.Pipe stages that will run in a pipelines.Pipeline.
 func exProcess[T any](p pipe.Pipe[T], params *pipe.Params) pipe.Pipe[T] {
-	return p.OrDone(    // OrDone will stop the pipeline if the input channel is closed.
+	return p.OrDone(    // pipe.Pipe.OrDone will stop the pipeline if the input channel is closed.
 		nil,
-	).FanOut(   // FanOut will run subsequent pipe.Pipe stages in parallel.
+	).FanOut(   // pipe.Pipe.FanOut will run subsequent pipe.Pipe stages in parallel.
 		params,
-	).Run(      // Run will execute the registered pipe function: squareOdds.
+	).Run(      // pipe.Pipe.Run will execute the registered pipe.Pipe process: "squareOdds".
 		"squareOdds",
 		nil,
-	)
+	)           // pipe.Pipe.Out automatically FanIns to a single output channel if needed 
 }
 
 func main() {
@@ -75,11 +75,11 @@ func main() {
 	// Create new Pipeline properties
 	props := pipelines.NewProps[int]( 
 		pipe.ProcessRegistry[int]{
-			"squareOdds": squareOdds,
+			"squareOdds": squareOdds,   // Register the user defined pipe.Pipe function "squareOdds".
 		},
 		inChan,
 		errChan,
-		2,
+		2,  // Set the number of concurrent pipe.Pipe stages to run.
 	)
 	// Create a new Pipeline
 	pl := pipelines.New[int](props, exProcess[int]) 
@@ -93,7 +93,7 @@ func main() {
 		}
 	}(errChan)
 	// Read Pipeline output
-	for out := range pl.Open(nil) { 
+	for out := range pl.Open(nil) {     // Open the Pipeline and read the output.
 		slog.Info("received simple pipeline output", slog.Int("out", out))
 	}
 }
