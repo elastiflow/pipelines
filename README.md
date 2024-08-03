@@ -54,7 +54,14 @@ func squareOdds(v int) (int, error) {
 
 // exProcess is a generic user defined pipelines.Pipeline function comprised of pipe.Pipe stages that will run in a pipelines.Pipeline.
 func exProcess[T any](p pipe.Pipe[T], params *pipe.Params) pipe.Pipe[T] {
-	return p.OrDone(nil).FanOut(params).Run("squareOdds", nil)
+	return p.OrDone(    // OrDone will stop the pipeline if the input channel is closed.
+		nil,
+	).FanOut(   // FanOut will run subsequent pipe.Pipe stages in parallel.
+		params,
+	).Run(      // Run will execute the registered pipe function: squareOdds.
+		"squareOdds",
+		nil,
+	)
 }
 
 func main() {
