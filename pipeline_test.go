@@ -8,8 +8,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func exProcess[T any](p pipe.Pipe[T], params *pipe.Params) pipe.Pipe[T] {
-	return p.OrDone(nil).FanOut(params).Run("testProcess", nil)
+func exProcess[T any](p pipe.Pipe[T]) pipe.Pipe[T] {
+	return p.OrDone(
+		pipe.DefaultParams(),
+	).FanOut(
+		pipe.Params{
+			Num: 2,
+		},
+	).Run(
+		"testProcess",
+		pipe.DefaultParams(),
+	)
 }
 
 func TestIntegrationPipelineOpen(t *testing.T) {
@@ -18,7 +27,6 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 		input       []int
 		process     ProcessFunc[int]
 		pipeProcess pipe.ProcessFunc[int]
-		fanNum      int
 		wantOutput  []int
 	}{
 		{
@@ -28,7 +36,6 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 			pipeProcess: func(v int) (int, error) {
 				return v * 2, nil
 			},
-			fanNum:     1,
 			wantOutput: []int{2, 4, 6, 8, 10},
 		},
 		{
@@ -41,7 +48,6 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 				}
 				return v, nil
 			},
-			fanNum:     1,
 			wantOutput: []int{1, 0, 3, 0, 5},
 		},
 	}
@@ -61,14 +67,13 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 				},
 				inputChan,
 				errChan,
-				tt.fanNum,
 			)
 			pipeline := New(
 				props,
 				tt.process,
 			)
 			var gotOutput []int
-			for v := range pipeline.Open(&pipe.Params{Num: tt.fanNum}) {
+			for v := range pipeline.Open() {
 				gotOutput = append(gotOutput, v)
 			}
 			assert.ElementsMatch(t, tt.wantOutput, gotOutput)
@@ -82,7 +87,6 @@ func TestIntegrationPipelineTee(t *testing.T) {
 		input       []int
 		process     ProcessFunc[int]
 		pipeProcess pipe.ProcessFunc[int]
-		fanNum      int
 		wantOutput  []int
 	}{
 		{
@@ -92,7 +96,6 @@ func TestIntegrationPipelineTee(t *testing.T) {
 			pipeProcess: func(v int) (int, error) {
 				return v * 2, nil
 			},
-			fanNum:     2,
 			wantOutput: []int{2, 4, 6, 8, 10},
 		},
 		{
@@ -105,7 +108,6 @@ func TestIntegrationPipelineTee(t *testing.T) {
 				}
 				return v, nil
 			},
-			fanNum:     2,
 			wantOutput: []int{1, 0, 3, 0, 5},
 		},
 	}
@@ -125,13 +127,12 @@ func TestIntegrationPipelineTee(t *testing.T) {
 				},
 				inputChan,
 				errChan,
-				tt.fanNum,
 			)
 			pipeline := New(
 				props,
 				tt.process,
 			)
-			out1, out2 := pipeline.Tee(&pipe.Params{Num: tt.fanNum, BufferSize: len(tt.input) + 1})
+			out1, out2 := pipeline.Tee(pipe.Params{BufferSize: len(tt.input) + 1})
 			var gotOutput1, gotOutput2 []int
 			for v := range out1 {
 				gotOutput1 = append(gotOutput1, v)

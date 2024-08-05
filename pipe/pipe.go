@@ -41,18 +41,15 @@ func (p Pipe[T]) Out() <-chan T {
 	if len(p.inStreams) == 1 {
 		return p.inStreams[0]
 	}
-	return p.FanIn(nil).inStreams[0] // If multiple streams, FanIn to a single stream
+	return p.FanIn(DefaultParams()).inStreams[0] // If multiple streams, FanIn to a single stream
 }
 
 // Run executes a user defined process function on the input stream(s)
 func (p Pipe[T]) Run(
 	name string,
-	params *Params,
+	params Params,
 ) Pipe[T] {
-	if params == nil {
-		params = &Params{}
-	}
-	nextPipe, outChannels := p.next(Standard, *params)
+	nextPipe, outChannels := p.next(Standard, params)
 	proc, found := p.processRegister[name]
 	if !found {
 		p.errStream <- fmt.Errorf("piper.Pipe.Run() error: process not registered: %s", name)
@@ -90,12 +87,9 @@ func (p Pipe[T]) Run(
 
 // Take a specific number of inputs from the inputStream(s)
 func (p Pipe[T]) Take(
-	params *Params,
+	params Params,
 ) Pipe[T] {
-	if params == nil {
-		params = &Params{}
-	}
-	nextPipe, outChannels := p.next(Standard, *params)
+	nextPipe, outChannels := p.next(Standard, params)
 	for i := 0; i < len(p.inStreams); i++ {
 		go func(inStream <-chan T, outStream chan<- T) {
 			defer close(outStream)
@@ -116,12 +110,9 @@ func (p Pipe[T]) Take(
 
 // FanOut kicks off a number of Pipe streams and round robins the input values
 func (p Pipe[T]) FanOut(
-	params *Params,
+	params Params,
 ) Pipe[T] {
-	if params == nil {
-		params = &Params{}
-	}
-	nextPipe, outChannels := p.next(FanOut, *params)
+	nextPipe, outChannels := p.next(FanOut, params)
 	go func(inStream <-chan T, outStreams senders[T]) {
 		defer outChannels.Close()
 		// Generate a weak random int ONLY to use in load balancing between outStreams
@@ -139,12 +130,9 @@ func (p Pipe[T]) FanOut(
 
 // FanIn merges a slice of input streams into a single output stream
 func (p Pipe[T]) FanIn(
-	params *Params,
+	params Params,
 ) Pipe[T] {
-	if params == nil {
-		params = &Params{}
-	}
-	nextPipe, outChannels := p.next(FanIn, *params)
+	nextPipe, outChannels := p.next(FanIn, params)
 	outSenders := outChannels.Senders()
 	var wg sync.WaitGroup
 	multiplex := func(c <-chan T) {
@@ -172,12 +160,9 @@ func (p Pipe[T]) FanIn(
 
 // OrDone checks to ensure that an external input stream is still running
 func (p Pipe[T]) OrDone(
-	params *Params,
+	params Params,
 ) Pipe[T] {
-	if params == nil {
-		params = &Params{}
-	}
-	nextPipe, outChannels := p.next(Standard, *params)
+	nextPipe, outChannels := p.next(Standard, params)
 	for i := 0; i < len(p.inStreams); i++ {
 		go func(inStream <-chan T, outStream chan<- T) {
 			defer close(outStream)
@@ -203,12 +188,9 @@ func (p Pipe[T]) OrDone(
 
 // Broadcast sends a copy of each value to a configurable number of new output channels
 func (p Pipe[T]) Broadcast(
-	params *Params,
+	params Params,
 ) Pipe[T] {
-	if params == nil {
-		params = &Params{}
-	}
-	nextPipe, outChannels := p.next(Broadcast, *params)
+	nextPipe, outChannels := p.next(Broadcast, params)
 	go func(inStream <-chan T, outStreams senders[T]) {
 		defer outChannels.Close()
 		for val := range inStream {
@@ -227,14 +209,11 @@ func (p Pipe[T]) Broadcast(
 
 // Tee splits values coming in from a channel so that you can send them off into two separate Pipe outputs
 func (p Pipe[T]) Tee(
-	params *Params,
+	params Params,
 ) (Pipe[T], Pipe[T]) {
 	{
-		if params == nil {
-			params = &Params{}
-		}
-		nextPipe1, outChannels1 := p.next(Standard, *params)
-		nextPipe2, outChannels2 := p.next(Standard, *params)
+		nextPipe1, outChannels1 := p.next(Standard, params)
+		nextPipe2, outChannels2 := p.next(Standard, params)
 		for i := 0; i < len(p.inStreams); i++ {
 			go func(in <-chan T, o1 chan<- T, o2 chan<- T) {
 				defer close(o1)

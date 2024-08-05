@@ -15,14 +15,14 @@ func squareOdds(v int) (int, error) {
 	return v * v, nil
 }
 
-func exProcess[T any](p pipe.Pipe[T], params *pipe.Params) pipe.Pipe[T] {
+func exProcess[T any](p pipe.Pipe[T]) pipe.Pipe[T] {
 	return p.OrDone(
-		pipe.NoParams(),
+		pipe.DefaultParams(),
 	).FanOut(
-		params,
+		pipe.Params{Num: 2},
 	).Run(
 		"squareOdds",
-		pipe.NoParams(),
+		pipe.DefaultParams(),
 	)
 }
 
@@ -45,7 +45,6 @@ func main() {
 		},
 		inChan,
 		errChan,
-		2,
 	)
 	pl := pipelines.New[int](props, exProcess[int]) // Create a new Pipeline
 	go func(errReceiver <-chan error) {             // Handle Pipeline errors
@@ -58,8 +57,8 @@ func main() {
 		}
 	}(errChan)
 	go seedPipeline(inChan)
-	var i int                       // Seed Pipeline inputs
-	for out := range pl.Open(nil) { // Read Pipeline output
+	var i int                    // Seed Pipeline inputs
+	for out := range pl.Open() { // Read Pipeline output
 		if i == 9 {
 			slog.Info("received simple pipeline output", slog.Int("out", out))
 			return

@@ -13,27 +13,29 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		name        string
 		pipeProcess pipe.ProcessFunc[int]
 		process     pipelines.ProcessFunc[int]
-		fanNum      int
 	}{
 		{
 			name: "fast pipeline",
 			pipeProcess: func(v int) (int, error) {
 				return v * 2, nil
 			},
-			process: func(p pipe.Pipe[int], params *pipe.Params) pipe.Pipe[int] {
-				return p.Run("testProcess", params)
+			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+				return p.Run("testProcess", pipe.Params{})
 			},
-			fanNum: 1,
 		},
 		{
 			name: "fast pipeline fanOut-5",
 			pipeProcess: func(v int) (int, error) {
 				return v * 2, nil
 			},
-			process: func(p pipe.Pipe[int], params *pipe.Params) pipe.Pipe[int] {
-				return p.FanOut(params).Run("testProcess", params)
+			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+				return p.FanOut(
+					pipe.Params{Num: 5},
+				).Run(
+					"testProcess",
+					pipe.DefaultParams(),
+				)
 			},
-			fanNum: 5,
 		},
 		{
 			name: "slow pipeline",
@@ -41,10 +43,12 @@ func BenchmarkPipelineOpen(b *testing.B) {
 				time.Sleep(2 * time.Millisecond)
 				return v * 2, nil
 			},
-			process: func(p pipe.Pipe[int], params *pipe.Params) pipe.Pipe[int] {
-				return p.FanOut(params).Run("testProcess", params)
+			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+				return p.Run(
+					"testProcess",
+					pipe.DefaultParams(),
+				)
 			},
-			fanNum: 1,
 		},
 		{
 			name: "slow pipeline fanOut-5",
@@ -52,10 +56,14 @@ func BenchmarkPipelineOpen(b *testing.B) {
 				time.Sleep(2 * time.Millisecond)
 				return v * 2, nil
 			},
-			process: func(p pipe.Pipe[int], params *pipe.Params) pipe.Pipe[int] {
-				return p.FanOut(params).Run("testProcess", params)
+			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+				return p.FanOut(
+					pipe.Params{Num: 5},
+				).Run(
+					"testProcess",
+					pipe.DefaultParams(),
+				)
 			},
-			fanNum: 5,
 		},
 		{
 			name: "slow pipeline fanOut-5 buffered-5",
@@ -63,10 +71,16 @@ func BenchmarkPipelineOpen(b *testing.B) {
 				time.Sleep(2 * time.Millisecond)
 				return v * 2, nil
 			},
-			process: func(p pipe.Pipe[int], params *pipe.Params) pipe.Pipe[int] {
-				return p.FanOut(params).Run("testProcess", params).FanIn(&pipe.Params{BufferSize: 5})
+			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+				return p.FanOut(
+					pipe.Params{Num: 5},
+				).Run(
+					"testProcess",
+					pipe.DefaultParams(),
+				).FanIn(
+					pipe.Params{BufferSize: 5},
+				)
 			},
-			fanNum: 5,
 		},
 	}
 
@@ -82,14 +96,13 @@ func BenchmarkPipelineOpen(b *testing.B) {
 				},
 				inputChan,
 				errChan,
-				bm.fanNum,
 			)
 			pipeline := pipelines.New(
 				props,
 				bm.process,
 			)
 			go func(pl pipelines.Pipeline[int]) {
-				for range pl.Open(nil) {
+				for range pl.Open() {
 				}
 			}(*pipeline)
 			b.ResetTimer()

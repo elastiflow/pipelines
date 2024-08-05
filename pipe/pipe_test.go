@@ -59,7 +59,7 @@ func TestPipeTake(t *testing.T) {
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
-			params := &Params{Num: tt.num}
+			params := Params{Num: tt.num}
 			outputPipe := pipe.Take(params)
 			var got []int
 			for _, stream := range outputPipe.inStreams {
@@ -114,7 +114,7 @@ func TestPipeFanOut(t *testing.T) {
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
-			params := &Params{Num: tt.num, BufferSize: len(tt.input)}
+			params := Params{Num: tt.num, BufferSize: len(tt.input)}
 			outputPipe := pipe.FanOut(params)
 			assert.Equal(t, tt.num, len(outputPipe.inStreams))
 			var got []int
@@ -176,7 +176,7 @@ func TestPipeFanIn(t *testing.T) {
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
-			params := &Params{BufferSize: len(tt.input)}
+			params := Params{BufferSize: len(tt.input)}
 			outputPipe := pipe.FanIn(params)
 			var got []int
 			for event := range outputPipe.inStreams[0] {
@@ -235,7 +235,7 @@ func TestPipeOrDone(t *testing.T) {
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
-			outputPipe := pipe.OrDone(&Params{})
+			outputPipe := pipe.OrDone(DefaultParams())
 			var got []int
 			for _, outStream := range outputPipe.inStreams {
 				for event := range outStream {
@@ -287,7 +287,7 @@ func TestPipeBroadcast(t *testing.T) {
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
-			params := &Params{Num: tt.num, BufferSize: len(tt.input)*tt.num + 1}
+			params := Params{Num: tt.num, BufferSize: len(tt.input)*tt.num + 1}
 			outputPipe := pipe.Broadcast(params)
 			assert.Equal(t, tt.num, len(outputPipe.inStreams))
 			var got []int
@@ -335,7 +335,7 @@ func TestPipeTee(t *testing.T) {
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
-			params := &Params{BufferSize: len(tt.input)}
+			params := Params{BufferSize: len(tt.input)}
 			outputPipe1, outputPipe2 := pipe.Tee(params)
 			var got [][]int
 			var got1, got2 []int
@@ -365,7 +365,7 @@ func TestPipeRun(t *testing.T) {
 		name    string
 		input   []int
 		process ProcessFunc[int]
-		params  *Params
+		params  Params
 		want    []int
 	}{
 		{
@@ -374,7 +374,7 @@ func TestPipeRun(t *testing.T) {
 			process: func(v int) (int, error) {
 				return v * 2, nil
 			},
-			params: &Params{},
+			params: DefaultParams(),
 			want:   []int{2, 4, 6, 8, 10},
 		},
 		{
@@ -383,7 +383,7 @@ func TestPipeRun(t *testing.T) {
 			process: func(v int) (int, error) {
 				return v * 2, nil
 			},
-			params: nil,
+			params: DefaultParams(),
 			want:   []int{2, 4, 6, 8, 10},
 		},
 		{
@@ -395,7 +395,7 @@ func TestPipeRun(t *testing.T) {
 				}
 				return v, nil
 			},
-			params: &Params{},
+			params: DefaultParams(),
 			want:   []int{1, 0, 3, 0, 5},
 		},
 		{
@@ -407,7 +407,7 @@ func TestPipeRun(t *testing.T) {
 				}
 				return v, nil
 			},
-			params: &Params{SkipError: true},
+			params: Params{SkipError: true},
 			want:   []int{1, 3, 5},
 		},
 		{
@@ -416,7 +416,7 @@ func TestPipeRun(t *testing.T) {
 			process: func(v int) (int, error) {
 				return v, nil
 			},
-			params: &Params{},
+			params: DefaultParams(),
 			want:   []int{},
 		},
 	}

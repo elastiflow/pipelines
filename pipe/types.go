@@ -7,8 +7,8 @@ type Params struct {
 	SkipError  bool
 }
 
-func NoParams() *Params {
-	return &Params{}
+func DefaultParams() Params {
+	return Params{}
 }
 
 // ProcessFunc is a user defined function type used in a given Pipe stage

@@ -7,8 +7,12 @@ import (
 	"github.com/elastiflow/pipelines/pipe"
 )
 
-func duplicateProcess[T any](p pipe.Pipe[T], params *pipe.Params) pipe.Pipe[T] {
-	return p.Broadcast(params).FanIn(pipe.NoParams()) // Broadcasting by X then Fanning In will create X duplicates per T.
+func duplicateProcess[T any](p pipe.Pipe[T]) pipe.Pipe[T] {
+	return p.Broadcast(
+		pipe.Params{Num: 2},
+	).FanIn(
+		pipe.DefaultParams(),
+	) // Broadcasting by X then Fanning In will create X duplicates per T.
 }
 
 func seedPipeline(inChan chan<- int) {
@@ -28,7 +32,6 @@ func main() {
 		pipe.ProcessRegistry[int]{},
 		inChan,
 		errChan,
-		2,
 	)
 	pl := pipelines.New[int](props, duplicateProcess[int]) // Create a new Pipeline
 	go func(errReceiver <-chan error) {                    // Handle Pipeline errors
@@ -40,8 +43,8 @@ func main() {
 			}
 		}
 	}(errChan)
-	go seedPipeline(inChan)         // Seed Pipeline inputs
-	for out := range pl.Open(nil) { // Read Pipeline output
+	go seedPipeline(inChan)      // Seed Pipeline inputs
+	for out := range pl.Open() { // Read Pipeline output
 		if out == 9 {
 			slog.Info("received simple pipeline output", slog.Int("out", out))
 			return
