@@ -78,7 +78,7 @@ func main() {
 			"squareOdds": squareOdds,   // Register the user defined pipe.Pipe function "squareOdds".
 		},
 		inChan,
-		errChan
+		errChan,
 	)
 	// Create a new Pipeline
 	pl := pipelines.New[int](props, exProcess[int]) 
