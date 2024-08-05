@@ -2,7 +2,6 @@ package pipe
 
 import (
 	"context"
-	"fmt"
 	"math/rand" // nosemgrep
 	"sync"
 	"time"
@@ -22,7 +21,7 @@ func New[T any](
 	register ProcessRegistry[T],
 	inStream <-chan T,
 	errStream chan<- error,
-) Pipe[T] {
+) Piper[T] {
 	return Pipe[T]{
 		ctx:             ctx,
 		errStream:       errStream,
@@ -41,54 +40,13 @@ func (p Pipe[T]) Out() <-chan T {
 	if len(p.inStreams) == 1 {
 		return p.inStreams[0]
 	}
-	return p.FanIn(DefaultParams()).inStreams[0] // If multiple streams, FanIn to a single stream
-}
-
-// Run executes a user defined process function on the input stream(s)
-func (p Pipe[T]) Run(
-	name string,
-	params Params,
-) Pipe[T] {
-	nextPipe, outChannels := p.next(Standard, params)
-	proc, found := p.processRegister[name]
-	if !found {
-		p.errStream <- fmt.Errorf("piper.Pipe.Run() error: process not registered: %s", name)
-		return p // return the same pipe to avoid nil pointer dereference / unhandled exception
-	}
-	for i := 0; i < len(p.inStreams); i++ {
-		go func(inStream <-chan T, outStream chan<- T, process ProcessFunc[T]) {
-			defer close(outStream)
-			for {
-				select {
-				case <-p.ctx.Done():
-					return
-				case v, ok := <-inStream:
-					if !ok {
-						return
-					}
-					val, err := process(v)
-					if err != nil {
-						p.errStream <- fmt.Errorf("piper.Pipe.Run(\"%s\") error: %w", name, err)
-						if params.SkipError {
-							continue
-						}
-					}
-					select {
-					case outStream <- val:
-					case <-p.ctx.Done():
-						return
-					}
-				}
-			}
-		}(p.inStreams[i], outChannels[i], proc)
-	}
-	return nextPipe
+	return p.FanIn(DefaultParams()).(Pipe[T]).inStreams[0] // If multiple streams, FanIn to a single stream
 }
 
 // Take a specific number of inputs from the inputStream(s)
 func (p Pipe[T]) Take(
 	params Params,
-) Pipe[T] {
+) Piper[T] {
 	nextPipe, outChannels := p.next(Standard, params)
 	for i := 0; i < len(p.inStreams); i++ {
 		go func(inStream <-chan T, outStream chan<- T) {
@@ -111,7 +69,7 @@ func (p Pipe[T]) Take(
 // FanOut kicks off a number of Pipe streams and round robins the input values
 func (p Pipe[T]) FanOut(
 	params Params,
-) Pipe[T] {
+) Piper[T] {
 	nextPipe, outChannels := p.next(FanOut, params)
 	go func(inStream <-chan T, outStreams senders[T]) {
 		defer outChannels.Close()
@@ -131,7 +89,7 @@ func (p Pipe[T]) FanOut(
 // FanIn merges a slice of input streams into a single output stream
 func (p Pipe[T]) FanIn(
 	params Params,
-) Pipe[T] {
+) Piper[T] {
 	nextPipe, outChannels := p.next(FanIn, params)
 	outSenders := outChannels.Senders()
 	var wg sync.WaitGroup
@@ -161,7 +119,7 @@ func (p Pipe[T]) FanIn(
 // OrDone checks to ensure that an external input stream is still running
 func (p Pipe[T]) OrDone(
 	params Params,
-) Pipe[T] {
+) Piper[T] {
 	nextPipe, outChannels := p.next(Standard, params)
 	for i := 0; i < len(p.inStreams); i++ {
 		go func(inStream <-chan T, outStream chan<- T) {
@@ -189,7 +147,7 @@ func (p Pipe[T]) OrDone(
 // Broadcast sends a copy of each value to a configurable number of new output channels
 func (p Pipe[T]) Broadcast(
 	params Params,
-) Pipe[T] {
+) Piper[T] {
 	nextPipe, outChannels := p.next(Broadcast, params)
 	go func(inStream <-chan T, outStreams senders[T]) {
 		defer outChannels.Close()
@@ -210,7 +168,7 @@ func (p Pipe[T]) Broadcast(
 // Tee splits values coming in from a channel so that you can send them off into two separate Pipe outputs
 func (p Pipe[T]) Tee(
 	params Params,
-) (Pipe[T], Pipe[T]) {
+) (Piper[T], Piper[T]) {
 	{
 		nextPipe1, outChannels1 := p.next(Standard, params)
 		nextPipe2, outChannels2 := p.next(Standard, params)
@@ -236,7 +194,7 @@ func (p Pipe[T]) Tee(
 	}
 }
 
-func (p Pipe[T]) next(pipeType Type, params Params) (Pipe[T], channels[T]) {
+func (p Pipe[T]) next(pipeType Type, params Params) (Piper[T], channels[T]) {
 	var chanCount int
 	switch pipeType {
 	case FanOut, Broadcast:
