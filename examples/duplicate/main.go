@@ -7,7 +7,7 @@ import (
 	"github.com/elastiflow/pipelines/pipe"
 )
 
-func duplicateProcess[T any](p pipe.Pipe[T]) pipe.Pipe[T] {
+func duplicateProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
 	return p.Broadcast(
 		pipe.Params{Num: 2},
 	).FanIn(
@@ -29,12 +29,11 @@ func main() {
 		close(errChan)
 	}()
 	props := pipelines.NewProps[int]( // Create new Pipeline properties
-		pipe.ProcessRegistry[int]{},
 		inChan,
 		errChan,
 	)
-	pl := pipelines.New[int](props, duplicateProcess[int]) // Create a new Pipeline
-	go func(errReceiver <-chan error) {                    // Handle Pipeline errors
+	pl := pipelines.New[int](props, duplicateProcess) // Create a new Pipeline
+	go func(errReceiver <-chan error) {               // Handle Pipeline errors
 		defer pl.Close()
 		for err := range errReceiver {
 			if err != nil {

@@ -14,9 +14,6 @@ func DefaultParams() Params {
 // ProcessFunc is a user defined function type used in a given Pipe stage
 type ProcessFunc[T any] func(T) (T, error)
 
-// ProcessRegistry enables the extension of pipe.Pipe with user defined methods
-type ProcessRegistry[T any] map[string]ProcessFunc[T]
-
 type receivers[T any] []<-chan T
 type senders[T any] []chan<- T
 type channels[T any] []chan T

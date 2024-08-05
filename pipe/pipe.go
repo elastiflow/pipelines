@@ -10,30 +10,22 @@ import (
 
 // Pipe is a struct that defines a generic stream process stage
 type Pipe[T any] struct {
-	ctx             context.Context
-	errStream       chan<- error
-	inStreams       []<-chan T
-	processRegister ProcessRegistry[T]
+	ctx       context.Context
+	errStream chan<- error
+	inStreams []<-chan T
 }
 
 // New constructs a new Pipe of a given type by passing in a pipelines.Pipeline context, registry, and IO streams
 func New[T any](
 	ctx context.Context,
-	register ProcessRegistry[T],
 	inStream <-chan T,
 	errStream chan<- error,
 ) Pipe[T] {
 	return Pipe[T]{
-		ctx:             ctx,
-		errStream:       errStream,
-		inStreams:       []<-chan T{inStream},
-		processRegister: register,
+		ctx:       ctx,
+		errStream: errStream,
+		inStreams: []<-chan T{inStream},
 	}
-}
-
-// Register a process function with a given name for an already existing Pipe
-func (p Pipe[T]) Register(name string, process ProcessFunc[T]) {
-	p.processRegister[name] = process
 }
 
 // Out the data outputted from a Pipe
@@ -46,15 +38,10 @@ func (p Pipe[T]) Out() <-chan T {
 
 // Run executes a user defined process function on the input stream(s)
 func (p Pipe[T]) Run(
-	name string,
+	proc ProcessFunc[T],
 	params Params,
 ) Pipe[T] {
 	nextPipe, outChannels := p.next(Standard, params)
-	proc, found := p.processRegister[name]
-	if !found {
-		p.errStream <- fmt.Errorf("piper.Pipe.Run() error: process not registered: %s", name)
-		return p // return the same pipe to avoid nil pointer dereference / unhandled exception
-	}
 	for i := 0; i < len(p.inStreams); i++ {
 		go func(inStream <-chan T, outStream chan<- T, process ProcessFunc[T]) {
 			defer close(outStream)
@@ -68,7 +55,7 @@ func (p Pipe[T]) Run(
 					}
 					val, err := process(v)
 					if err != nil {
-						p.errStream <- fmt.Errorf("piper.Pipe.Run(\"%s\") error: %w", name, err)
+						p.errStream <- fmt.Errorf("piper.Pipe.Run() error: %w", err)
 						if params.SkipError {
 							continue
 						}
@@ -249,10 +236,9 @@ func (p Pipe[T]) next(pipeType Type, params Params) (Pipe[T], channels[T]) {
 	streams := make(channels[T], chanCount)
 	streams.Initialize(params.BufferSize)
 	return Pipe[T]{
-			ctx:             p.ctx,
-			errStream:       p.errStream,
-			inStreams:       streams.Receivers(),
-			processRegister: p.processRegister,
+			ctx:       p.ctx,
+			errStream: p.errStream,
+			inStreams: streams.Receivers(),
 		},
 		streams
 }

@@ -8,45 +8,51 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func exProcess[T any](p pipe.Pipe[T]) pipe.Pipe[T] {
-	return p.OrDone(
-		pipe.DefaultParams(),
-	).FanOut(
-		pipe.Params{
-			Num: 2,
-		},
-	).Run(
-		"testProcess",
-		pipe.DefaultParams(),
-	)
-}
-
 func TestIntegrationPipelineOpen(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       []int
-		process     ProcessFunc[int]
-		pipeProcess pipe.ProcessFunc[int]
-		wantOutput  []int
+		name       string
+		input      []int
+		process    ProcessFunc[int]
+		wantOutput []int
 	}{
 		{
-			name:    "simple process",
-			input:   []int{1, 2, 3, 4, 5},
-			process: exProcess[int],
-			pipeProcess: func(v int) (int, error) {
-				return v * 2, nil
+			name:  "simple process",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+				return p.OrDone(
+					pipe.DefaultParams(),
+				).FanOut(
+					pipe.Params{
+						Num: 2,
+					},
+				).Run(
+					func(v int) (int, error) {
+						return v * 2, nil
+					},
+					pipe.DefaultParams(),
+				)
 			},
 			wantOutput: []int{2, 4, 6, 8, 10},
 		},
 		{
-			name:    "process with error",
-			input:   []int{1, 2, 3, 4, 5},
-			process: exProcess[int],
-			pipeProcess: func(v int) (int, error) {
-				if v%2 == 0 {
-					return 0, fmt.Errorf("even number error")
-				}
-				return v, nil
+			name:  "process with error",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+				return p.OrDone(
+					pipe.DefaultParams(),
+				).FanOut(
+					pipe.Params{
+						Num: 2,
+					},
+				).Run(
+					func(v int) (int, error) {
+						if v%2 == 0 {
+							return 0, fmt.Errorf("even number error")
+						}
+						return v, nil
+					},
+					pipe.DefaultParams(),
+				)
 			},
 			wantOutput: []int{1, 0, 3, 0, 5},
 		},
@@ -62,9 +68,6 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 			errChan := make(chan error, len(tt.input))
 			defer close(errChan)
 			props := NewProps[int]( // Create new Pipeline properties
-				pipe.ProcessRegistry[int]{
-					"testProcess": tt.pipeProcess,
-				},
 				inputChan,
 				errChan,
 			)
@@ -90,23 +93,46 @@ func TestIntegrationPipelineTee(t *testing.T) {
 		wantOutput  []int
 	}{
 		{
-			name:    "simple process",
-			input:   []int{1, 2, 3, 4, 5},
-			process: exProcess[int],
+			name:  "simple process",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+				return p.OrDone(
+					pipe.DefaultParams(),
+				).FanOut(
+					pipe.Params{
+						Num: 2,
+					},
+				).Run(
+					func(v int) (int, error) {
+						return v * 2, nil
+					},
+					pipe.DefaultParams(),
+				)
+			},
 			pipeProcess: func(v int) (int, error) {
 				return v * 2, nil
 			},
 			wantOutput: []int{2, 4, 6, 8, 10},
 		},
 		{
-			name:    "process with error",
-			input:   []int{1, 2, 3, 4, 5},
-			process: exProcess[int],
-			pipeProcess: func(v int) (int, error) {
-				if v%2 == 0 {
-					return 0, fmt.Errorf("even number error")
-				}
-				return v, nil
+			name:  "process with error",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+				return p.OrDone(
+					pipe.DefaultParams(),
+				).FanOut(
+					pipe.Params{
+						Num: 2,
+					},
+				).Run(
+					func(v int) (int, error) {
+						if v%2 == 0 {
+							return 0, fmt.Errorf("even number error")
+						}
+						return v, nil
+					},
+					pipe.DefaultParams(),
+				)
 			},
 			wantOutput: []int{1, 0, 3, 0, 5},
 		},
@@ -122,9 +148,6 @@ func TestIntegrationPipelineTee(t *testing.T) {
 			close(inputChan)
 			defer close(errChan)
 			props := NewProps[int]( // Create new Pipeline properties
-				pipe.ProcessRegistry[int]{
-					"testProcess": tt.pipeProcess,
-				},
 				inputChan,
 				errChan,
 			)

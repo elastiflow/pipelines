@@ -431,15 +431,12 @@ func TestPipeRun(t *testing.T) {
 			}
 			close(inputStream)
 			errStream := make(chan error, len(tt.input))
-			processRegister := make(ProcessRegistry[int])
-			processRegister["testProcess"] = tt.process
 			pipe := Pipe[int]{
-				ctx:             ctx,
-				errStream:       errStream,
-				inStreams:       []<-chan int{inputStream},
-				processRegister: processRegister,
+				ctx:       ctx,
+				errStream: errStream,
+				inStreams: []<-chan int{inputStream},
 			}
-			outputPipe := pipe.Run("testProcess", tt.params)
+			outputPipe := pipe.Run(tt.process, tt.params)
 			var got []int
 			for event := range outputPipe.inStreams[0] {
 				got = append(got, event)

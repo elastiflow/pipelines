@@ -52,14 +52,14 @@ func squareOdds(v int) (int, error) {
 	return v * v, nil
 }
 
-// exProcess is a generic user defined pipelines.Pipeline function comprised of pipe.Pipe stages that will run in a pipelines.Pipeline.
-func exProcess[T any](p pipe.Pipe[T]) pipe.Pipe[T] {
+// exampleProcess is a generic user defined pipelines.Pipeline function comprised of pipe.Pipe stages that will run in a pipelines.Pipeline.
+func exampleProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
 	return p.OrDone(    // pipe.Pipe.OrDone will stop the pipeline if the input channel is closed.
 		pipe.DefaultParams(), 
 	).FanOut(   // pipe.Pipe.FanOut will run subsequent pipe.Pipe stages in parallel.
         pipe.Params{Num: 2},
-	).Run(      // pipe.Pipe.Run will execute the registered pipe.Pipe process: "squareOdds".
-		"squareOdds",
+	).Run(      // pipe.Pipe.Run will execute the pipe.Pipe process: "squareOdds".
+        squareOdds,
 		pipe.DefaultParams(),
 	)           // pipe.Pipe.Out automatically FanIns to a single output channel if needed.
 }
@@ -73,15 +73,12 @@ func main() {
 		close(errChan)
 	}()
 	// Create new Pipeline properties
-	props := pipelines.NewProps[int]( 
-		pipe.ProcessRegistry[int]{
-			"squareOdds": squareOdds,   // Register the user defined pipe.Pipe function "squareOdds".
-		},
+	props := pipelines.NewProps[int](
 		inChan,
 		errChan,
 	)
 	// Create a new Pipeline
-	pl := pipelines.New[int](props, exProcess[int]) 
+	pl := pipelines.New[int](props, exampleProcess) 
 	go func(errReceiver <-chan error) {             // Handle Pipeline errors
 		defer pl.Close()
 		for err := range errReceiver {
