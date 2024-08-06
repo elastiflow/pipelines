@@ -21,7 +21,8 @@ type PipelineWrapper struct {
 
 // NewPipelineWrapper creates a new PipelineWrapper with counters set to 0
 func NewPipelineWrapper() *PipelineWrapper {
-	inChan := make(chan int) // Setup channels and cleanup
+	// Setup channels and return PipelineWrapper
+	inChan := make(chan int)
 	errChan := make(chan error, 10)
 	return &PipelineWrapper{
 		errChan:     errChan,
