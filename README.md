@@ -23,8 +23,7 @@ The `pipe.Pipe` struct is the core of the `pipelines` module. It manages the flo
 ### Key Components
 
 - **Params**: Used to pass arguments into `Pipe` methods.
-- **ProcessFunc**: A user-defined function type used in a given `Pipe` stage.
-- **ProcessRegistry**: Enables the extension of `pipe.Pipe` with user-defined methods.
+- **ProcessFunc**: A user-defined function type used in a given `Pipe` stage via the `Pipe.Run()` method.
 
 ### Examples
 
