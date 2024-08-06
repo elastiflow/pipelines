@@ -7,8 +7,9 @@ The `pipelines` module is a Go library designed to facilitate the creation and m
 To get started with the `pipelines` module, follow these steps:
 
 * Get the `pipelines` module:
+
     ```sh
-    go get github.com/yourusername/pipelines
+    go get github.com/elastiflow/pipelines
     ```
 
 ## Pipeline
