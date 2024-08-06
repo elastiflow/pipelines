@@ -1,25 +1,107 @@
-- [Overview](#overview)
-- [Repo settings](#repo-settings)
+# Pipelines
 
-## Overview
-Use this repo as a [template repo for new Go modules](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template)
-* Please module change the `module_template` name in the `go.mod` and `example_test.go`
-* Please add some description on what/how module should be used for
-* Add some "honorable" notes if any
-* Please add some examples to the `examples`
+The `pipelines` module is a Go library designed to facilitate the creation and management of data processing pipelines. It provides a set of tools for flow control, error handling, and pipeline processes.
 
-## Repo settings
-Please don't forget to set following properties in the repo settings and drop this section right after.
-* Allow "Allow squash merging" only in the "General settings"
-* Check the "Always suggest updating pull request branches" option in the "General" settings
-* Check the "Automatically delete head branches" option in the "General" settings
-* Add `Ops` team with "Admin" permissions
-* Add `Centaur` team with "Maintain" permissions
-* Add `main` branch protection rules in "Branches":
-  * "Require a pull request before merging"
-  * "Require approvals"
-  * "Dismiss stale pull request approvals when new commits are pushed"
-  * "Require status checks to pass before merging"
-  * "Require conversation resolution before merging"
-  * "Require linear history"
-  * "Do not allow bypassing the above settings"
+## Setup
+
+To get started with the `pipelines` module, follow these steps:
+
+* Get the `pipelines` module:
+
+    ```sh
+    go get github.com/elastiflow/pipelines
+    ```
+
+## Documentation
+
+1. Ensure godocs are installed:
+    ```sh
+    go install -v golang.org/x/tools/cmd/godoc@latest
+    ```
+
+2. Run make docs command to start godocs on port 6060 locally:
+    ```sh
+    make docs
+    ```
+
+3. Once running, visit [GoDocs](http://localhost:6060/pkg/github.com/elastiflow/pipelines/) to view the latest documentation locally.
+
+## Pipeline
+
+A pipeline is a series of data processing stages connected by channels. Each stage (pipe.Pipe) is a function that performs a specific task and passes its output to the next stage. The `pipelines` module provides a flexible way to define and manage these stages.
+
+## Pipe
+
+The `pipe.Pipe` struct is the core of the `pipelines` module. It manages the flow of data through the pipeline stages and handles errors according to the provided parameters.
+
+### Key Components
+
+- **Params**: Used to pass arguments into `Pipe` methods.
+- **ProcessFunc**: A user-defined function type used in a given `Pipe` stage via the `Pipe.Run()` method.
+
+
+### Examples
+
+Below are examples of how to use the `pipelines` module to create simple pipelines.
+
+#### Squaring Numbers
+
+This example demonstrates how to set up a pipeline that takes a stream of integers, squares each integer, and outputs the results.
+
+```go
+package main
+
+import (
+	"fmt"
+	"log/slog"
+
+	"github.com/elastiflow/pipelines"
+	"github.com/elastiflow/pipelines/pipe"
+)
+
+// squareNumbers is a user defined pipe.Pipe function that squares an integer, will be registered and used in a pipe.Pipe.
+func squareOdds(v int) (int, error) {
+	if v%2 == 0 {
+		return v, fmt.Errorf("even number error: %v", v)
+	}
+	return v * v, nil
+}
+
+// exampleProcess is a generic user defined pipelines.Pipeline function comprised of pipe.Pipe stages that will run in a pipelines.Pipeline.
+func exampleProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
+	return p.OrDone().FanOut(   // pipe.Pipe.OrDone will stop the pipeline if the input channel is closed. 
+	    pipe.Params{Num: 2},    // pipe.Pipe.FanOut will run subsequent pipe.Pipe stages in parallel. 
+	).Run(                      // pipe.Pipe.Run will execute the pipe.Pipe process: "squareOdds". 
+	    squareOdds,
+	)                           // pipe.Pipe.Out automatically FanIns to a single output channel if needed.
+}
+
+func main() {
+	// Setup channels and cleanup
+	inChan := make(chan int) 
+	errChan := make(chan error, 10)
+	defer func() {
+		close(inChan)
+		close(errChan)
+	}()
+	// Create a new Pipeline
+	pl := pipelines.New[int](
+		inChan, 
+		errChan, 
+		exampleProcess, 
+	) 
+	go func(errReceiver <-chan error) {             // Handle Pipeline errors
+		defer pl.Close()
+		for err := range errReceiver {
+			if err != nil {
+				slog.Error("demo error: " + err.Error())
+				// return // if you wanted to close the pipeline during error handling.
+			}
+		}
+	}(errChan)
+	// Read Pipeline output
+	for out := range pl.Open() {     // Open the Pipeline and read the output.
+		slog.Info("received simple pipeline output", slog.Int("out", out))
+	}
+}
+```
