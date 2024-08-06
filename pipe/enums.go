@@ -1,10 +1,10 @@
 package pipe
 
-type Type int
+type pipeType int
 
 const (
-	Standard Type = iota
-	FanOut
-	FanIn
-	Broadcast
+	standard pipeType = iota
+	fanOut
+	fanIn
+	broadcast
 )

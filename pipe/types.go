@@ -1,16 +1,5 @@
 package pipe
 
-// Params are used to pass args into Pipe methods.
-type Params struct {
-	Num        int
-	BufferSize int
-	SkipError  bool
-}
-
-func DefaultParams() Params {
-	return Params{}
-}
-
 // ProcessFunc is a user defined function type used in a given Pipe stage
 type ProcessFunc[T any] func(T) (T, error)
 

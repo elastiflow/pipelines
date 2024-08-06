@@ -16,13 +16,10 @@ func squareOdds(v int) (int, error) {
 }
 
 func exProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
-	return p.OrDone(
-		pipe.DefaultParams(),
-	).FanOut(
+	return p.OrDone().FanOut(
 		pipe.Params{Num: 2},
 	).Run(
 		squareOdds,
-		pipe.DefaultParams(),
 	)
 }
 
@@ -39,12 +36,12 @@ func main() {
 		close(inChan)
 		close(errChan)
 	}()
-	props := pipelines.NewProps[int]( // Create new Pipeline properties
+	pl := pipelines.New[int]( // Create a new Pipeline
 		inChan,
 		errChan,
+		exProcess,
 	)
-	pl := pipelines.New[int](props, exProcess) // Create a new Pipeline
-	go func(errReceiver <-chan error) {        // Handle Pipeline errors
+	go func(errReceiver <-chan error) { // Handle Pipeline errors
 		defer pl.Close()
 		for err := range errReceiver {
 			if err != nil {

@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPipeTake(t *testing.T) {
+func TestPipe_Take(t *testing.T) {
 	tests := []struct {
 		name  string
 		input [][]int
@@ -44,6 +44,7 @@ func TestPipeTake(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var inputStreams []<-chan int
@@ -72,7 +73,7 @@ func TestPipeTake(t *testing.T) {
 	}
 }
 
-func TestPipeFanOut(t *testing.T) {
+func TestPipe_FanOut(t *testing.T) {
 	tests := []struct {
 		name  string
 		input []int
@@ -103,6 +104,7 @@ func TestPipeFanOut(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			inputStream := make(chan int, len(tt.input))
@@ -128,7 +130,7 @@ func TestPipeFanOut(t *testing.T) {
 	}
 }
 
-func TestPipeFanIn(t *testing.T) {
+func TestPipe_FanIn(t *testing.T) {
 	tests := []struct {
 		name  string
 		input [][]int
@@ -161,6 +163,7 @@ func TestPipeFanIn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var inputStreams []<-chan int
@@ -187,7 +190,7 @@ func TestPipeFanIn(t *testing.T) {
 	}
 }
 
-func TestPipeOrDone(t *testing.T) {
+func TestPipe_OrDone(t *testing.T) {
 	tests := []struct {
 		name  string
 		input [][]int
@@ -220,6 +223,7 @@ func TestPipeOrDone(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var inputStreams []<-chan int
@@ -235,7 +239,7 @@ func TestPipeOrDone(t *testing.T) {
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
-			outputPipe := pipe.OrDone(DefaultParams())
+			outputPipe := pipe.OrDone()
 			var got []int
 			for _, outStream := range outputPipe.inStreams {
 				for event := range outStream {
@@ -247,7 +251,7 @@ func TestPipeOrDone(t *testing.T) {
 	}
 }
 
-func TestPipeBroadcast(t *testing.T) {
+func TestPipe_Broadcast(t *testing.T) {
 	tests := []struct {
 		name  string
 		input []int
@@ -276,6 +280,7 @@ func TestPipeBroadcast(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			inputStream := make(chan int, len(tt.input))
@@ -301,7 +306,7 @@ func TestPipeBroadcast(t *testing.T) {
 	}
 }
 
-func TestPipeTee(t *testing.T) {
+func TestPipe_Tee(t *testing.T) {
 	tests := []struct {
 		name  string
 		input []int
@@ -324,6 +329,7 @@ func TestPipeTee(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			inputStream := make(chan int, len(tt.input))
@@ -360,7 +366,7 @@ func TestPipeTee(t *testing.T) {
 	}
 }
 
-func TestPipeRun(t *testing.T) {
+func TestPipe_Run(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   []int
@@ -374,7 +380,7 @@ func TestPipeRun(t *testing.T) {
 			process: func(v int) (int, error) {
 				return v * 2, nil
 			},
-			params: DefaultParams(),
+			params: Params{},
 			want:   []int{2, 4, 6, 8, 10},
 		},
 		{
@@ -383,7 +389,7 @@ func TestPipeRun(t *testing.T) {
 			process: func(v int) (int, error) {
 				return v * 2, nil
 			},
-			params: DefaultParams(),
+			params: Params{},
 			want:   []int{2, 4, 6, 8, 10},
 		},
 		{
@@ -395,7 +401,7 @@ func TestPipeRun(t *testing.T) {
 				}
 				return v, nil
 			},
-			params: DefaultParams(),
+			params: Params{},
 			want:   []int{1, 0, 3, 0, 5},
 		},
 		{
@@ -416,13 +422,14 @@ func TestPipeRun(t *testing.T) {
 			process: func(v int) (int, error) {
 				return v, nil
 			},
-			params: DefaultParams(),
+			params: Params{},
 			want:   []int{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			inputStream := make(chan int, len(tt.input))

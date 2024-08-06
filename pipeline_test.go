@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIntegrationPipelineOpen(t *testing.T) {
+func TestIntegrationPipeline_Open(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      []int
@@ -19,9 +19,7 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 			name:  "simple process",
 			input: []int{1, 2, 3, 4, 5},
 			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
-				return p.OrDone(
-					pipe.DefaultParams(),
-				).FanOut(
+				return p.OrDone().FanOut(
 					pipe.Params{
 						Num: 2,
 					},
@@ -29,7 +27,6 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 					func(v int) (int, error) {
 						return v * 2, nil
 					},
-					pipe.DefaultParams(),
 				)
 			},
 			wantOutput: []int{2, 4, 6, 8, 10},
@@ -38,9 +35,7 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 			name:  "process with error",
 			input: []int{1, 2, 3, 4, 5},
 			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
-				return p.OrDone(
-					pipe.DefaultParams(),
-				).FanOut(
+				return p.OrDone().FanOut(
 					pipe.Params{
 						Num: 2,
 					},
@@ -51,7 +46,6 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 						}
 						return v, nil
 					},
-					pipe.DefaultParams(),
 				)
 			},
 			wantOutput: []int{1, 0, 3, 0, 5},
@@ -67,12 +61,9 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 			close(inputChan)
 			errChan := make(chan error, len(tt.input))
 			defer close(errChan)
-			props := NewProps[int]( // Create new Pipeline properties
+			pipeline := New(
 				inputChan,
 				errChan,
-			)
-			pipeline := New(
-				props,
 				tt.process,
 			)
 			var gotOutput []int
@@ -84,7 +75,7 @@ func TestIntegrationPipelineOpen(t *testing.T) {
 	}
 }
 
-func TestIntegrationPipelineTee(t *testing.T) {
+func TestIntegrationPipeline_Tee(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       []int
@@ -96,9 +87,7 @@ func TestIntegrationPipelineTee(t *testing.T) {
 			name:  "simple process",
 			input: []int{1, 2, 3, 4, 5},
 			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
-				return p.OrDone(
-					pipe.DefaultParams(),
-				).FanOut(
+				return p.OrDone().FanOut(
 					pipe.Params{
 						Num: 2,
 					},
@@ -106,7 +95,6 @@ func TestIntegrationPipelineTee(t *testing.T) {
 					func(v int) (int, error) {
 						return v * 2, nil
 					},
-					pipe.DefaultParams(),
 				)
 			},
 			pipeProcess: func(v int) (int, error) {
@@ -118,9 +106,7 @@ func TestIntegrationPipelineTee(t *testing.T) {
 			name:  "process with error",
 			input: []int{1, 2, 3, 4, 5},
 			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
-				return p.OrDone(
-					pipe.DefaultParams(),
-				).FanOut(
+				return p.OrDone().FanOut(
 					pipe.Params{
 						Num: 2,
 					},
@@ -131,7 +117,6 @@ func TestIntegrationPipelineTee(t *testing.T) {
 						}
 						return v, nil
 					},
-					pipe.DefaultParams(),
 				)
 			},
 			wantOutput: []int{1, 0, 3, 0, 5},
@@ -140,6 +125,7 @@ func TestIntegrationPipelineTee(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			inputChan := make(chan int, len(tt.input)*3)
 			for _, v := range tt.input {
 				inputChan <- v
@@ -147,12 +133,9 @@ func TestIntegrationPipelineTee(t *testing.T) {
 			errChan := make(chan error, len(tt.input)*3)
 			close(inputChan)
 			defer close(errChan)
-			props := NewProps[int]( // Create new Pipeline properties
+			pipeline := New(
 				inputChan,
 				errChan,
-			)
-			pipeline := New(
-				props,
 				tt.process,
 			)
 			out1, out2 := pipeline.Tee(pipe.Params{BufferSize: len(tt.input) + 1})
@@ -167,4 +150,106 @@ func TestIntegrationPipelineTee(t *testing.T) {
 			assert.ElementsMatch(t, tt.wantOutput, gotOutput2)
 		})
 	}
+}
+
+// ExamplePipeline_Open demonstrates how to create and use a simple pipeline
+// that processes integer inputs by doubling their values.
+func ExamplePipeline_Open() {
+	inChan := make(chan int)
+	errChan := make(chan error)
+	defer func() {
+		close(inChan)
+		close(errChan)
+	}()
+
+	// Seed the input channel
+	go func() {
+		for i := 1; i <= 5; i++ {
+			inChan <- i
+		}
+	}()
+
+	// Define a simple process function that doubles the input values
+	process := func(p pipe.Pipe[int]) pipe.Pipe[int] {
+		return p.Run(func(v int) (int, error) {
+			return v * 2, nil
+		})
+	}
+
+	// Create and open the pipeline
+	pipeline := New(inChan, errChan, process)
+	c := 0
+	for out := range pipeline.Open() {
+		fmt.Println(out)
+		c++
+		if c == 5 {
+			break
+		}
+	}
+
+	// Output:
+	// 2
+	// 4
+	// 6
+	// 8
+	// 10
+}
+
+// ExamplePipeline_Tee demonstrates how to create and use a simple pipeline
+// that processes integer inputs by doubling their values and then tees the output.
+func ExamplePipeline_Tee() {
+	inChan := make(chan int)
+	errChan := make(chan error)
+	defer func() {
+		close(inChan)
+		close(errChan)
+	}()
+
+	// Seed the input channel
+	go func() {
+		for i := 1; i <= 5; i++ {
+			inChan <- i
+		}
+	}()
+
+	// Define a simple process function that doubles the input values
+	process := func(p pipe.Pipe[int]) pipe.Pipe[int] {
+		return p.Run(func(v int) (int, error) {
+			return v * 2, nil
+		})
+	}
+
+	// Create and open the pipeline
+	pipeline := New(inChan, errChan, process)
+	out1, out2 := pipeline.Tee(pipe.Params{BufferSize: 5})
+
+	// Collect and print the results from both outputs
+	c := 0
+	for out := range out1 {
+		fmt.Println("out1:", out)
+		c++
+		if c == 5 {
+			break
+		}
+	}
+	x := 0
+	for out := range out2 {
+		fmt.Println("out2:", out)
+		x++
+		if x == 5 {
+			break
+		}
+	}
+
+	// Output:
+	// out1: 2
+	// out1: 4
+	// out1: 6
+	// out1: 8
+	// out1: 10
+	// out2: 2
+	// out2: 4
+	// out2: 6
+	// out2: 8
+	// out2: 10
 }

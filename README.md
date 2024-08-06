@@ -12,6 +12,20 @@ To get started with the `pipelines` module, follow these steps:
     go get github.com/elastiflow/pipelines
     ```
 
+## Documentation
+
+1. Ensure godocs are installed:
+    ```sh
+    go install -v golang.org/x/tools/cmd/godoc@latest
+    ```
+
+2. Run make docs command to start godocs on port 6060 locally:
+    ```sh
+    make docs
+    ```
+
+3. Once running, visit [GoDocs](http://localhost:6060/pkg/github.com/elastiflow/pipelines/) to view the latest documentation locally.
+
 ## Pipeline
 
 A pipeline is a series of data processing stages connected by channels. Each stage (pipe.Pipe) is a function that performs a specific task and passes its output to the next stage. The `pipelines` module provides a flexible way to define and manage these stages.
@@ -24,6 +38,7 @@ The `pipe.Pipe` struct is the core of the `pipelines` module. It manages the flo
 
 - **Params**: Used to pass arguments into `Pipe` methods.
 - **ProcessFunc**: A user-defined function type used in a given `Pipe` stage via the `Pipe.Run()` method.
+
 
 ### Examples
 
@@ -54,14 +69,11 @@ func squareOdds(v int) (int, error) {
 
 // exampleProcess is a generic user defined pipelines.Pipeline function comprised of pipe.Pipe stages that will run in a pipelines.Pipeline.
 func exampleProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
-	return p.OrDone(    // pipe.Pipe.OrDone will stop the pipeline if the input channel is closed. 
-	    pipe.DefaultParams(), 
-	).FanOut(   // pipe.Pipe.FanOut will run subsequent pipe.Pipe stages in parallel. 
-	    pipe.Params{Num: 2},
-	).Run(      // pipe.Pipe.Run will execute the pipe.Pipe process: "squareOdds". 
+	return p.OrDone().FanOut(   // pipe.Pipe.OrDone will stop the pipeline if the input channel is closed. 
+	    pipe.Params{Num: 2},    // pipe.Pipe.FanOut will run subsequent pipe.Pipe stages in parallel. 
+	).Run(                      // pipe.Pipe.Run will execute the pipe.Pipe process: "squareOdds". 
 	    squareOdds,
-            pipe.DefaultParams(),
-	)           // pipe.Pipe.Out automatically FanIns to a single output channel if needed.
+	)                           // pipe.Pipe.Out automatically FanIns to a single output channel if needed.
 }
 
 func main() {
@@ -72,13 +84,12 @@ func main() {
 		close(inChan)
 		close(errChan)
 	}()
-	// Create new Pipeline properties
-	props := pipelines.NewProps[int](
-		inChan,
-		errChan,
-	)
 	// Create a new Pipeline
-	pl := pipelines.New[int](props, exampleProcess) 
+	pl := pipelines.New[int](
+		inChan, 
+		errChan, 
+		exampleProcess, 
+	) 
 	go func(errReceiver <-chan error) {             // Handle Pipeline errors
 		defer pl.Close()
 		for err := range errReceiver {

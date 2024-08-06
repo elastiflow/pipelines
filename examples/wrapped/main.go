@@ -38,12 +38,12 @@ func (pl *PipelineWrapper) Run() {
 		close(pl.inChan)
 		close(pl.errChan)
 	}()
-	props := pipelines.NewProps[int]( // Create new Pipeline properties
+	pl.pipeline = pipelines.New[int]( // Create a new Pipeline
 		pl.inChan,
 		pl.errChan,
+		pl.exampleProcess,
 	)
-	pl.pipeline = pipelines.New[int](props, pl.exampleProcess) // Create a new Pipeline
-	go func(errReceiver <-chan error) {                        // Handle Pipeline errors
+	go func(errReceiver <-chan error) { // Handle Pipeline errors
 		defer pl.pipeline.Close()
 		for err := range errReceiver {
 			if err != nil {
@@ -80,13 +80,10 @@ func (pl *PipelineWrapper) squareOdds(v int) (int, error) {
 
 // exampleProcess is the pipeline.Processor method used in this example.
 func (pl *PipelineWrapper) exampleProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
-	return p.OrDone(
-		pipe.DefaultParams(),
-	).FanOut(
+	return p.OrDone().FanOut(
 		pipe.Params{Num: 2},
 	).Run(
 		pl.squareOdds,
-		pipe.DefaultParams(),
 	)
 }
 

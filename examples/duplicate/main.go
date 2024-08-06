@@ -10,9 +10,7 @@ import (
 func duplicateProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
 	return p.Broadcast(
 		pipe.Params{Num: 2},
-	).FanIn(
-		pipe.DefaultParams(),
-	) // Broadcasting by X then Fanning In will create X duplicates per T.
+	).FanIn() // Broadcasting by X then Fanning In will create X duplicates per T.
 }
 
 func seedPipeline(inChan chan<- int) {
@@ -28,12 +26,12 @@ func main() {
 		close(inChan)
 		close(errChan)
 	}()
-	props := pipelines.NewProps[int]( // Create new Pipeline properties
+	pl := pipelines.New[int]( // Create a new Pipeline
 		inChan,
 		errChan,
+		duplicateProcess,
 	)
-	pl := pipelines.New[int](props, duplicateProcess) // Create a new Pipeline
-	go func(errReceiver <-chan error) {               // Handle Pipeline errors
+	go func(errReceiver <-chan error) { // Handle Pipeline errors
 		defer pl.Close()
 		for err := range errReceiver {
 			if err != nil {

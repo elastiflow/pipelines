@@ -33,7 +33,6 @@ func BenchmarkPipelineOpen(b *testing.B) {
 					func(v int) (int, error) {
 						return v * 2, nil
 					},
-					pipe.DefaultParams(),
 				)
 			},
 		},
@@ -45,7 +44,6 @@ func BenchmarkPipelineOpen(b *testing.B) {
 						time.Sleep(2 * time.Millisecond)
 						return v * 2, nil
 					},
-					pipe.DefaultParams(),
 				)
 			},
 		},
@@ -59,7 +57,6 @@ func BenchmarkPipelineOpen(b *testing.B) {
 						time.Sleep(2 * time.Millisecond)
 						return v * 2, nil
 					},
-					pipe.DefaultParams(),
 				)
 			},
 		},
@@ -73,7 +70,6 @@ func BenchmarkPipelineOpen(b *testing.B) {
 						time.Sleep(2 * time.Millisecond)
 						return v * 2, nil
 					},
-					pipe.DefaultParams(),
 				).FanIn(
 					pipe.Params{BufferSize: 5},
 				)
@@ -87,12 +83,9 @@ func BenchmarkPipelineOpen(b *testing.B) {
 			defer close(inputChan)
 			errChan := make(chan error, 1)
 			defer close(errChan)
-			props := pipelines.NewProps[int]( // Create new Pipeline properties
+			pipeline := pipelines.New(
 				inputChan,
 				errChan,
-			)
-			pipeline := pipelines.New(
-				props,
 				bm.process,
 			)
 			go func(pl pipelines.Pipeline[int]) {
