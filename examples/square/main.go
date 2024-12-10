@@ -15,7 +15,7 @@ func squareOdds(v int) (int, error) {
 	return v * v, nil
 }
 
-func exProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
+func exProcess(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 	return p.OrDone().FanOut(
 		pipe.Params{Num: 2},
 	).Run(

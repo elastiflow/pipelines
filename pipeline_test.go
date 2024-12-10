@@ -18,7 +18,7 @@ func TestIntegrationPipeline_Open(t *testing.T) {
 		{
 			name:  "simple process",
 			input: []int{1, 2, 3, 4, 5},
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 				return p.OrDone().FanOut(
 					pipe.Params{
 						Num: 2,
@@ -34,7 +34,7 @@ func TestIntegrationPipeline_Open(t *testing.T) {
 		{
 			name:  "process with error",
 			input: []int{1, 2, 3, 4, 5},
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 				return p.OrDone().FanOut(
 					pipe.Params{
 						Num: 2,
@@ -86,7 +86,7 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 		{
 			name:  "simple process",
 			input: []int{1, 2, 3, 4, 5},
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 				return p.OrDone().FanOut(
 					pipe.Params{
 						Num: 2,
@@ -105,7 +105,7 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 		{
 			name:  "process with error",
 			input: []int{1, 2, 3, 4, 5},
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 				return p.OrDone().FanOut(
 					pipe.Params{
 						Num: 2,
@@ -170,7 +170,7 @@ func ExamplePipeline_Open() {
 	}()
 
 	// Define a simple process function that doubles the input values
-	process := func(p pipe.Pipe[int]) pipe.Pipe[int] {
+	process := func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 		return p.Run(func(v int) (int, error) {
 			return v * 2, nil
 		})
@@ -213,7 +213,7 @@ func ExamplePipeline_Tee() {
 	}()
 
 	// Define a simple process function that doubles the input values
-	process := func(p pipe.Pipe[int]) pipe.Pipe[int] {
+	process := func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 		return p.Run(func(v int) (int, error) {
 			return v * 2, nil
 		})

@@ -56,7 +56,7 @@ func TestPipe_Take(t *testing.T) {
 				close(eventStream)
 				inputStreams = append(inputStreams, eventStream)
 			}
-			pipe := Pipe[int]{
+			pipe := Pipe[int, int]{
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
@@ -112,7 +112,7 @@ func TestPipe_FanOut(t *testing.T) {
 				inputStream <- event
 			}
 			close(inputStream)
-			pipe := Pipe[int]{
+			pipe := Pipe[int, int]{
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
@@ -175,7 +175,7 @@ func TestPipe_FanIn(t *testing.T) {
 				close(eventStream)
 				inputStreams = append(inputStreams, eventStream)
 			}
-			pipe := Pipe[int]{
+			pipe := Pipe[int, int]{
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
@@ -235,7 +235,7 @@ func TestPipe_OrDone(t *testing.T) {
 				close(eventStream)
 				inputStreams = append(inputStreams, eventStream)
 			}
-			pipe := Pipe[int]{
+			pipe := Pipe[int, int]{
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
@@ -288,7 +288,7 @@ func TestPipe_Broadcast(t *testing.T) {
 				inputStream <- event
 			}
 			close(inputStream)
-			pipe := Pipe[int]{
+			pipe := Pipe[int, int]{
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
@@ -337,7 +337,7 @@ func TestPipe_Tee(t *testing.T) {
 				inputStream <- event
 			}
 			close(inputStream)
-			pipe := Pipe[int]{
+			pipe := Pipe[int, int]{
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
@@ -438,13 +438,100 @@ func TestPipe_Run(t *testing.T) {
 			}
 			close(inputStream)
 			errStream := make(chan error, len(tt.input))
-			pipe := Pipe[int]{
+			pipe := Pipe[int, int]{
 				ctx:       ctx,
 				errStream: errStream,
 				inStreams: []<-chan int{inputStream},
 			}
 			outputPipe := pipe.Run(tt.process, tt.params)
 			var got []int
+			for event := range outputPipe.inStreams[0] {
+				got = append(got, event)
+			}
+			assert.ElementsMatch(t, tt.want, got)
+		})
+	}
+}
+
+func TestPipe_Map(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []int
+		process MapFunc[int, string]
+		params  Params
+		want    []string
+	}{
+		{
+			name:  "run with simple process",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(v int) (string, error) {
+				return fmt.Sprintf("%d", v+2), nil
+			},
+			params: Params{},
+			want:   []string{"3", "4", "5", "6", "7"},
+		},
+		{
+			name:  "run with nil params",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(v int) (string, error) {
+				return fmt.Sprintf("%d", v*2), nil
+			},
+			params: Params{},
+			want:   []string{"2", "4", "6", "8", "10"},
+		},
+		{
+			name:  "run with error process",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(v int) (string, error) {
+				if v%2 == 0 {
+					return "0", fmt.Errorf("even number error")
+				}
+				return fmt.Sprintf("%d", v), nil
+			},
+			params: Params{},
+			want:   []string{"1", "0", "3", "0", "5"},
+		},
+		{
+			name:  "run with error process skip",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(v int) (string, error) {
+				if v%2 == 0 {
+					return "", fmt.Errorf("even number error")
+				}
+				return fmt.Sprintf("%d", v), nil
+			},
+			params: Params{SkipError: true},
+			want:   []string{"1", "3", "5"},
+		},
+		{
+			name:  "run with empty input",
+			input: []int{},
+			process: func(v int) (string, error) {
+				return "", nil
+			},
+			params: Params{},
+			want:   []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			inputStream := make(chan int, len(tt.input))
+			for _, event := range tt.input {
+				inputStream <- event
+			}
+			close(inputStream)
+			errStream := make(chan error, len(tt.input))
+			pipe := Pipe[int, string]{
+				ctx:       ctx,
+				errStream: errStream,
+				inStreams: []<-chan int{inputStream},
+			}
+			outputPipe := pipe.Map(tt.process, tt.params)
+			var got []string
 			for event := range outputPipe.inStreams[0] {
 				got = append(got, event)
 			}

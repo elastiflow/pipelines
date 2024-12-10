@@ -7,7 +7,7 @@ import (
 	"github.com/elastiflow/pipelines/pipe"
 )
 
-func duplicateProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
+func duplicateProcess(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 	return p.Broadcast(
 		pipe.Params{Num: 2},
 	).FanIn() // Broadcasting by X then Fanning In will create X duplicates per T.

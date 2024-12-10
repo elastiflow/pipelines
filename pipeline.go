@@ -70,7 +70,7 @@ import (
 )
 
 // ProcessFunc is a function type used by Pipeline to define the sequence of pipe.Pipe operations
-type ProcessFunc[T any] func(pipe.Pipe[T]) pipe.Pipe[T]
+type ProcessFunc[T any] func(pipe.Pipe[T, T]) pipe.Pipe[T, T]
 
 // Pipeline is a struct that defines a generic stream process
 type Pipeline[T any] struct {

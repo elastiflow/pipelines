@@ -15,7 +15,7 @@ func BenchmarkPipelineOpen(b *testing.B) {
 	}{
 		{
 			name: "fast pipeline",
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 				return p.Run(
 					func(v int) (int, error) {
 						return v * 2, nil
@@ -26,7 +26,7 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "fast pipeline fanOut-5",
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 				return p.FanOut(
 					pipe.Params{Num: 5},
 				).Run(
@@ -38,7 +38,7 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "slow pipeline",
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 				return p.Run(
 					func(v int) (int, error) {
 						time.Sleep(2 * time.Millisecond)
@@ -49,7 +49,7 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "slow pipeline fanOut-5",
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 				return p.FanOut(
 					pipe.Params{Num: 5},
 				).Run(
@@ -62,7 +62,7 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "slow pipeline fanOut-5 buffered-5",
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 				return p.FanOut(
 					pipe.Params{Num: 5},
 				).Run(

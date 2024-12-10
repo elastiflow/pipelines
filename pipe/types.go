@@ -3,6 +3,9 @@ package pipe
 // ProcessFunc is a user defined function type used in a given Pipe stage
 type ProcessFunc[T any] func(T) (T, error)
 
+// MapFunc is a user defined function type used in a given Pipe stage
+type MapFunc[T any, U any] func(T) (U, error)
+
 type receivers[T any] []<-chan T
 type senders[T any] []chan<- T
 type channels[T any] []chan T
