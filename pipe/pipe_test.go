@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -536,6 +537,128 @@ func TestPipe_Map(t *testing.T) {
 				got = append(got, event)
 			}
 			assert.ElementsMatch(t, tt.want, got)
+		})
+	}
+}
+
+func TestIntegration_Map(t *testing.T) {
+	tests := []struct {
+		name             string
+		processes        []ProcessFunc[int]
+		transformers     []MapFunc[int, string]
+		postprocessor    []ProcessFunc[string]
+		expectedElements []string
+	}{
+		{
+			name: "process then transform the data",
+			processes: []ProcessFunc[int]{
+				func(v int) (int, error) {
+					return v * 2, nil
+				},
+			},
+			transformers: []MapFunc[int, string]{
+				func(v int) (string, error) {
+					return fmt.Sprintf("dollars: %v", v), nil
+				},
+			},
+			expectedElements: []string{
+				"dollars: 0",
+				"dollars: 2",
+				"dollars: 4",
+				"dollars: 6",
+				"dollars: 8",
+			},
+		},
+		{
+			name: "map then post process the results",
+			transformers: []MapFunc[int, string]{
+				func(v int) (string, error) {
+					return fmt.Sprintf("dollars: %v", v), nil
+				},
+			},
+			postprocessor: []ProcessFunc[string]{
+				func(v string) (string, error) {
+					return fmt.Sprintf("I was not multiplied, %v", v), nil
+				},
+			},
+			expectedElements: []string{
+				"I was not multiplied, dollars: 0",
+				"I was not multiplied, dollars: 1",
+				"I was not multiplied, dollars: 2",
+				"I was not multiplied, dollars: 3",
+				"I was not multiplied, dollars: 4",
+			},
+		},
+		{
+			name: "multi process to fan out map the process output",
+			processes: []ProcessFunc[int]{
+				func(v int) (int, error) {
+					return v * 2, nil
+				},
+				func(v int) (int, error) {
+					return v * v, nil
+				},
+				func(v int) (int, error) {
+					return v % 3, nil
+				},
+			},
+			transformers: []MapFunc[int, string]{
+				func(v int) (string, error) {
+					return fmt.Sprintf("modulo: %v", v), nil
+				},
+			},
+			postprocessor: []ProcessFunc[string]{
+				func(v string) (string, error) {
+					return fmt.Sprintf("I'm divisible by 3, %v", v), nil
+				},
+			},
+			expectedElements: []string{
+				"I'm divisible by 3, modulo: 0",
+				"I'm divisible by 3, modulo: 1",
+				"I'm divisible by 3, modulo: 1",
+				"I'm divisible by 3, modulo: 0",
+				"I'm divisible by 3, modulo: 1",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inputChan := make(chan int)
+			errChan := make(chan error, 1)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer func() {
+				close(errChan)
+				cancel()
+			}()
+
+			go func() {
+				for num := range 5 {
+					inputChan <- num
+				}
+				close(inputChan)
+			}()
+
+			pipe := NewMap[int, string](ctx, inputChan, errChan)
+			for _, process := range tt.processes {
+				pipe = pipe.Run(process)
+			}
+
+			var next_ Pipe[string, string]
+			for _, transformer := range tt.transformers {
+				next_ = pipe.Map(transformer)
+			}
+
+			for _, postprocessor := range tt.postprocessor {
+				next_ = next_.Run(postprocessor)
+			}
+
+			var results []string
+			for out := range next_.OrDone().Out() {
+				results = append(results, out)
+			}
+
+			assert.ElementsMatch(t, tt.expectedElements, results)
 		})
 	}
 }
