@@ -34,7 +34,7 @@ func main() {
 		close(errChan)
 	}()
 
-	pipe_ := pipe.NewMap[int, string](
+	pipe_ := pipe.New[int, string](
 		context.Background(),
 		inChan,
 		errChan,

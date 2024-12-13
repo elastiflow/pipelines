@@ -7,7 +7,7 @@
 //
 // The main components of this package are:
 // - Pipeline: A struct that defines a generic stream process.
-// - ProcessFunc: A function type used by Pipeline to define the sequence of pipe.Pipe operations.
+// - ProcessorFunc: A function type used by Pipeline to define the sequence of pipe.Pipe operations.
 //
 // Pipeline is the main entry point for using the package. It initializes
 // and manages a sequence of Pipe. It provides methods to open
@@ -98,7 +98,7 @@ func (p *Pipeline[T]) Open() <-chan T {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancelFunc = cancel
 	return p.process(
-		pipe.New[T](ctx, p.inputChan, p.errorChan),
+		pipe.New[T, T](ctx, p.inputChan, p.errorChan),
 	).Out()
 }
 
@@ -107,7 +107,7 @@ func (p *Pipeline[T]) Tee(params pipe.Params) (<-chan T, <-chan T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancelFunc = cancel
 	out1, out2 := p.process(
-		pipe.New[T](ctx, p.inputChan, p.errorChan),
+		pipe.New[T, T](ctx, p.inputChan, p.errorChan),
 	).Tee(params)
 	return out1.Out(), out2.Out()
 }

@@ -80,7 +80,7 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 		name        string
 		input       []int
 		process     ProcessFunc[int]
-		pipeProcess pipe.ProcessFunc[int]
+		pipeProcess pipe.ProcessorFunc[int]
 		wantOutput  []int
 	}{
 		{

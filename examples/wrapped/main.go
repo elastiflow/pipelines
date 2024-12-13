@@ -78,7 +78,7 @@ func (pl *PipelineWrapper) squareOdds(v int) (int, error) {
 	return v * v, nil
 }
 
-// exampleProcess is the pipeline.Processor method used in this example.
+// exampleProcess is the pipeline.ProcessorFunc method used in this example.
 func (pl *PipelineWrapper) exampleProcess(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 	return p.OrDone().FanOut(
 		pipe.Params{Num: 2},

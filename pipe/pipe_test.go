@@ -2,6 +2,7 @@ package pipe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -371,7 +372,7 @@ func TestPipe_Run(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   []int
-		process ProcessFunc[int]
+		process ProcessorFunc[int]
 		params  Params
 		want    []int
 	}{
@@ -454,11 +455,65 @@ func TestPipe_Run(t *testing.T) {
 	}
 }
 
+func TestPipe_Filter(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  []int
+		filter FilterFunc[int]
+		params Params
+		want   []int
+	}{
+		{
+			name:  "run with simple process",
+			input: []int{1, 2, 3, 4, 5},
+			filter: func(v int) (bool, error) {
+				return v%2 == 0, nil
+			},
+			params: Params{},
+			want:   []int{2, 4},
+		},
+		{
+			name:  "run with errors",
+			input: []int{1, 2, 3, 4, 5},
+			filter: func(v int) (bool, error) {
+				return true, errors.New("error")
+			},
+			params: Params{},
+			want:   []int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			inputStream := make(chan int, len(tt.input))
+			for _, event := range tt.input {
+				inputStream <- event
+			}
+			close(inputStream)
+			errStream := make(chan error, len(tt.input))
+			pipe := Pipe[int, string]{
+				ctx:       ctx,
+				errStream: errStream,
+				inStreams: []<-chan int{inputStream},
+			}
+			outputPipe := pipe.Filter(tt.filter, tt.params)
+			var got []int
+			for event := range outputPipe.inStreams[0] {
+				got = append(got, event)
+			}
+			assert.ElementsMatch(t, tt.want, got)
+		})
+	}
+}
+
 func TestPipe_Map(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   []int
-		process MapFunc[int, string]
+		process TransformFunc[int, string]
 		params  Params
 		want    []string
 	}{
@@ -544,19 +599,19 @@ func TestPipe_Map(t *testing.T) {
 func TestIntegration_Map(t *testing.T) {
 	tests := []struct {
 		name             string
-		processes        []ProcessFunc[int]
-		transformers     []MapFunc[int, string]
-		postprocessor    []ProcessFunc[string]
+		processes        []ProcessorFunc[int]
+		transformers     []TransformFunc[int, string]
+		postprocessor    []ProcessorFunc[string]
 		expectedElements []string
 	}{
 		{
 			name: "process then transform the data",
-			processes: []ProcessFunc[int]{
+			processes: []ProcessorFunc[int]{
 				func(v int) (int, error) {
 					return v * 2, nil
 				},
 			},
-			transformers: []MapFunc[int, string]{
+			transformers: []TransformFunc[int, string]{
 				func(v int) (string, error) {
 					return fmt.Sprintf("dollars: %v", v), nil
 				},
@@ -571,12 +626,12 @@ func TestIntegration_Map(t *testing.T) {
 		},
 		{
 			name: "map then post process the results",
-			transformers: []MapFunc[int, string]{
+			transformers: []TransformFunc[int, string]{
 				func(v int) (string, error) {
 					return fmt.Sprintf("dollars: %v", v), nil
 				},
 			},
-			postprocessor: []ProcessFunc[string]{
+			postprocessor: []ProcessorFunc[string]{
 				func(v string) (string, error) {
 					return fmt.Sprintf("I was not multiplied, %v", v), nil
 				},
@@ -591,7 +646,7 @@ func TestIntegration_Map(t *testing.T) {
 		},
 		{
 			name: "multi process to fan out map the process output",
-			processes: []ProcessFunc[int]{
+			processes: []ProcessorFunc[int]{
 				func(v int) (int, error) {
 					return v * 2, nil
 				},
@@ -602,12 +657,12 @@ func TestIntegration_Map(t *testing.T) {
 					return v % 3, nil
 				},
 			},
-			transformers: []MapFunc[int, string]{
+			transformers: []TransformFunc[int, string]{
 				func(v int) (string, error) {
 					return fmt.Sprintf("modulo: %v", v), nil
 				},
 			},
-			postprocessor: []ProcessFunc[string]{
+			postprocessor: []ProcessorFunc[string]{
 				func(v string) (string, error) {
 					return fmt.Sprintf("I'm divisible by 3, %v", v), nil
 				},
@@ -639,7 +694,7 @@ func TestIntegration_Map(t *testing.T) {
 				close(inputChan)
 			}()
 
-			pipe := NewMap[int, string](ctx, inputChan, errChan)
+			pipe := New[int, string](ctx, inputChan, errChan)
 			for _, process := range tt.processes {
 				pipe = pipe.Run(process)
 			}

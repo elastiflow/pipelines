@@ -1,10 +1,13 @@
 package pipe
 
-// ProcessFunc is a user defined function type used in a given Pipe stage
-type ProcessFunc[T any] func(T) (T, error)
+// ProcessorFunc is a user defined function type used in a given Pipe stage
+type ProcessorFunc[T any] func(T) (T, error)
 
-// MapFunc is a user defined function type used in a given Pipe stage
-type MapFunc[T any, U any] func(T) (U, error)
+// TransformFunc is a user defined function type used in a given Pipe stage
+type TransformFunc[T any, U any] func(T) (U, error)
+
+// FilterFunc is a user defined function type used in a given Pipe stage
+type FilterFunc[T any] func(T) (bool, error)
 
 type receivers[T any] []<-chan T
 type senders[T any] []chan<- T

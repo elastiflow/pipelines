@@ -16,20 +16,7 @@ type Pipe[T any, U any] struct {
 }
 
 // New constructs a new Pipe of a given type by passing in a pipelines.Pipeline context, registry, and IO streams
-func New[T any](
-	ctx context.Context,
-	inStream <-chan T,
-	errStream chan<- error,
-) Pipe[T, T] {
-	return Pipe[T, T]{
-		ctx:       ctx,
-		errStream: errStream,
-		inStreams: []<-chan T{inStream},
-	}
-}
-
-// NewMap constructs a Pipe that can be used to map values from one type to another
-func NewMap[T any, U any](
+func New[T any, U any](
 	ctx context.Context,
 	inStream <-chan T,
 	errStream chan<- error,
@@ -51,13 +38,13 @@ func (p Pipe[T, U]) Out() <-chan T {
 
 // Run executes a user defined process function on the input stream(s)
 func (p Pipe[T, U]) Run(
-	proc ProcessFunc[T],
+	proc ProcessorFunc[T],
 	params ...Params,
 ) Pipe[T, U] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
-		go func(inStream <-chan T, outStream chan<- T, process ProcessFunc[T]) {
+		go func(inStream <-chan T, outStream chan<- T, process ProcessorFunc[T]) {
 			defer close(outStream)
 			for {
 				select {
@@ -88,13 +75,13 @@ func (p Pipe[T, U]) Run(
 
 // Map applies a user defined function to each value in the input stream(s)
 func (p Pipe[T, U]) Map(
-	proc MapFunc[T, U],
+	proc TransformFunc[T, U],
 	params ...Params,
 ) Pipe[U, U] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextU(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
-		go func(inStream <-chan T, outStream chan<- U, process MapFunc[T, U]) {
+		go func(inStream <-chan T, outStream chan<- U, process TransformFunc[T, U]) {
 			defer close(outStream)
 			for {
 				select {
@@ -123,7 +110,33 @@ func (p Pipe[T, U]) Map(
 	return nextPipe
 }
 
-//
+// Filter applies a user defined function to each value in the input stream(s) and only returns values that pass the filter
+func (p Pipe[T, U]) Filter(filter FilterFunc[T], params ...Params) Pipe[T, U] {
+	param := applyParams(params...)
+	nextPipe, outChannels := p.nextT(standard, param)
+	for i := 0; i < len(p.inStreams); i++ {
+		go func(inStream <-chan T, outStream chan<- T) {
+			defer close(outStream)
+			for val := range inStream {
+				pass, err := filter(val)
+				if err != nil {
+					p.errStream <- err
+					continue
+				}
+				if !pass {
+					continue
+				}
+				select {
+				case outStream <- val:
+				case <-p.ctx.Done():
+					return
+				}
+			}
+		}(p.inStreams[i], outChannels[i])
+	}
+
+	return nextPipe
+}
 
 // Take a specific number of inputs from the inputStream(s)
 func (p Pipe[T, U]) Take(
