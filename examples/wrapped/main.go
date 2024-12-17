@@ -60,6 +60,7 @@ func (pl *PipelineWrapper) Run() {
 	}(pl.errChan)
 	for out := range pl.pipeline.Out() { // Read Pipeline output
 		slog.Info("received simple pipeline output", slog.Int("out", out))
+		// Continue processing if needed
 	}
 }
 
