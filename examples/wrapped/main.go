@@ -7,8 +7,7 @@ import (
 	"sync"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/errors"
-	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/elastiflow/pipelines/sources"
 )
 
@@ -47,7 +46,7 @@ func (pl *PipelineWrapper) Run() {
 	pl.pipeline = pipelines.FromSource[int, int]( // Create a new Pipeline
 		context.Background(),
 		sources.FromArray(createIntArr(10)), // Create a new source
-		make(chan errors.Error, 10),
+		make(chan error, 10),
 	).With(pl.exampleProcess)
 
 	defer pl.pipeline.Close()
@@ -79,9 +78,9 @@ func (pl *PipelineWrapper) squareOdds(v int) (int, error) {
 }
 
 // exampleProcess is the pipeline.ProcessorFunc method used in this example.
-func (pl *PipelineWrapper) exampleProcess(p pipe.DataStream[int]) pipe.DataStream[int] {
+func (pl *PipelineWrapper) exampleProcess(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 	return p.OrDone().FanOut(
-		pipe.Params{Num: 2},
+		datastreams.Params{Num: 2},
 	).Run(
 		pl.squareOdds,
 	)

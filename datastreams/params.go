@@ -1,4 +1,4 @@
-package pipe
+package datastreams
 
 // Params are used to pass args into DataStream methods.
 type Params struct {

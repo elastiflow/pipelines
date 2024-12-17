@@ -66,20 +66,19 @@ package pipelines
 import (
 	"context"
 
-	"github.com/elastiflow/pipelines/errors"
-	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/elastiflow/pipelines/sources"
 )
 
-type ProcessFunc[T any] func(stream pipe.DataStream[T]) pipe.DataStream[T]
+type ProcessFunc[T any] func(stream datastreams.DataStream[T]) datastreams.DataStream[T]
 
 type Source[T any] interface {
-	Consume(ctx context.Context, errs chan<- errors.Error)
+	Consume(ctx context.Context)
 	Out() <-chan T
 }
 
 type Sink[T any] interface {
-	Publish(context.Context, <-chan T, chan<- errors.Error)
+	Publish(context.Context, <-chan T, chan<- error)
 }
 
 type Opts struct {
@@ -88,10 +87,10 @@ type Opts struct {
 
 // Pipeline is a struct that defines a generic stream process
 type Pipeline[T any, U any] struct {
-	ds         pipe.DataStream[T]
+	ds         datastreams.DataStream[T]
 	ctx        context.Context
 	cancelFunc context.CancelFunc
-	errors     chan errors.Error
+	errors     chan error
 	source     Source[T]
 }
 
@@ -99,12 +98,12 @@ type Pipeline[T any, U any] struct {
 func FromSource[T any, U any](
 	ctx context.Context,
 	source Source[T],
-	errChan chan errors.Error,
+	errChan chan error,
 ) *Pipeline[T, U] {
-	go source.Consume(ctx, errChan)
+	go source.Consume(ctx)
 	return &Pipeline[T, U]{
 		ctx:    ctx,
-		ds:     pipe.NewDataStream[T](ctx, source.Out(), errChan),
+		ds:     datastreams.New[T](ctx, source.Out(), errChan),
 		errors: errChan,
 		source: source,
 	}
@@ -113,14 +112,14 @@ func FromSource[T any, U any](
 // New constructs a new Pipeline of a given type by passing in the properties and process function
 func New[T any, U any](
 	ctx context.Context,
-	ds pipe.DataStream[T],
-	errChan chan errors.Error,
+	ds datastreams.DataStream[T],
+	errChan chan error,
 ) *Pipeline[T, U] {
 	ctx, cancelFunc := context.WithCancel(ctx)
 	return &Pipeline[T, U]{
 		cancelFunc: cancelFunc,
 		ctx:        ctx,
-		ds:         pipe.NewDataStream[T](ctx, ds.Out(), errChan),
+		ds:         datastreams.New[T](ctx, ds.Out(), errChan),
 		errors:     errChan,
 	}
 }
@@ -131,13 +130,13 @@ func (p *Pipeline[T, U]) Close() {
 }
 
 // Errors returns the error channel of the Pipeline
-func (p *Pipeline[T, U]) Errors() <-chan errors.Error {
+func (p *Pipeline[T, U]) Errors() <-chan error {
 	return p.errors
 }
 
 // Map creates a new pipeline by applying a mapper function to each message in the stream
-func (p *Pipeline[T, U]) Map(mapper pipe.Transformer[T, U], params ...pipe.Params) *Pipeline[U, U] {
-	outPipe := pipe.Map[T, U](p.ds, mapper, params...)
+func (p *Pipeline[T, U]) Map(mapper datastreams.Transformer[T, U], params ...datastreams.Params) *Pipeline[U, U] {
+	outPipe := datastreams.Map[T, U](p.ds, mapper, params...)
 	return New[U, U](p.ctx, outPipe, p.errors)
 }
 
@@ -152,7 +151,7 @@ func (p *Pipeline[T, U]) Out() <-chan T {
 }
 
 // Process creates a new pipeline by applying a processor function to each message in the stream
-func (p *Pipeline[T, U]) Process(processor pipe.Processor[T], params ...pipe.Params) *Pipeline[T, U] {
+func (p *Pipeline[T, U]) Process(processor datastreams.Processor[T], params ...datastreams.Params) *Pipeline[T, U] {
 	return New[T, U](p.ctx, p.ds.Run(processor, params...), p.errors)
 }
 
@@ -162,7 +161,7 @@ func (p *Pipeline[T, U]) Sink(sink Sink[T]) {
 }
 
 // Tee creates a fork in the stream, allowing for two separate streams to be created from the original
-func (p *Pipeline[T, U]) Tee(params ...pipe.Params) (*Pipeline[T, U], *Pipeline[T, U]) {
+func (p *Pipeline[T, U]) Tee(params ...datastreams.Params) (*Pipeline[T, U], *Pipeline[T, U]) {
 	ds1, ds2 := p.ds.Tee(params...)
 	return New[T, U](p.ctx, ds1, p.errors),
 		New[T, U](p.ctx, ds2, p.errors)

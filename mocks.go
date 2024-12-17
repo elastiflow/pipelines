@@ -2,8 +2,8 @@ package pipelines
 
 import (
 	"context"
+	"fmt"
 
-	pipelineErrors "github.com/elastiflow/pipelines/errors"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -17,7 +17,7 @@ func NewMockConsumer[T any](messages []T) *MockConsumer[T] {
 	return &MockConsumer[T]{out: out, messages: messages}
 }
 
-func (m *MockConsumer[T]) Consume(ctx context.Context, errs chan<- pipelineErrors.Error) {
+func (m *MockConsumer[T]) Consume(ctx context.Context) {
 	defer close(m.out)
 	for _, msg := range m.messages {
 		m.out <- msg
@@ -54,10 +54,10 @@ func newMockPublisher[T any](sender sender[T]) *publisher[T] {
 	}
 }
 
-func (m *publisher[T]) Publish(ctx context.Context, in <-chan T, errs chan<- pipelineErrors.Error) {
+func (m *publisher[T]) Publish(ctx context.Context, in <-chan T, errs chan<- error) {
 	for input := range in {
 		if err := m.sender.send(input); err != nil {
-			errs <- pipelineErrors.NewSegment("publisher", "", err)
+			errs <- fmt.Errorf("publisher error: %wr", err)
 		}
 	}
 }

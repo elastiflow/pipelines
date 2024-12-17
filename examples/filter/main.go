@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/errors"
-	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/elastiflow/pipelines/sources"
 )
 
@@ -29,15 +28,15 @@ func mapFunc(p int) (string, error) {
 }
 
 func main() {
-	errChan := make(chan errors.Error, 10)
+	errChan := make(chan error, 10)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer func() {
 		close(errChan)
 		cancel()
 	}()
 
-	connector := func(p pipe.DataStream[int]) pipe.DataStream[int] {
-		return p.FanOut(pipe.Params{Num: 3}).Filter(filter)
+	connector := func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+		return p.FanOut(datastreams.Params{Num: 3}).Filter(filter)
 	}
 
 	pl := pipelines.FromSource[int, string](

@@ -7,26 +7,18 @@ import (
 	"testing"
 	"time"
 
-	pipelineErrors "github.com/elastiflow/pipelines/errors"
-	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
-
-type consoleSender struct{}
-
-func (p *consoleSender) send(v string) error {
-	fmt.Println("published:", v)
-	return nil
-}
 
 func TestIntegrationPipeline_Map(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       []int
-		preprocess  []pipe.Processor[int]
-		mapFunc     pipe.Transformer[int, string]
-		postprocess []pipe.Processor[string]
+		preprocess  []datastreams.Processor[int]
+		mapFunc     datastreams.Transformer[int, string]
+		postprocess []datastreams.Processor[string]
 		wantStrings []string
 	}{
 		{
@@ -40,7 +32,7 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 		{
 			name:  "map with a preprocess ",
 			input: []int{1, 2, 3, 4, 5},
-			preprocess: []pipe.Processor[int]{func(p int) (int, error) {
+			preprocess: []datastreams.Processor[int]{func(p int) (int, error) {
 				return p * 2, nil
 			}},
 			mapFunc: func(p int) (string, error) {
@@ -51,13 +43,13 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 		{
 			name:  "map with a preprocess and postprocess",
 			input: []int{1, 2, 3, 4, 5},
-			preprocess: []pipe.Processor[int]{func(p int) (int, error) {
+			preprocess: []datastreams.Processor[int]{func(p int) (int, error) {
 				return p * 2, nil
 			}},
 			mapFunc: func(p int) (string, error) {
 				return fmt.Sprintf("I'm a string %d", p), nil
 			},
-			postprocess: []pipe.Processor[string]{func(p string) (string, error) {
+			postprocess: []datastreams.Processor[string]{func(p string) (string, error) {
 				return p + "!", nil
 			}},
 			wantStrings: []string{"I'm a string 2!", "I'm a string 4!", "I'm a string 6!", "I'm a string 8!", "I'm a string 10!"},
@@ -67,7 +59,7 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			consumer := NewMockConsumer(tt.input)
-			errChan := make(chan pipelineErrors.Error, len(tt.input))
+			errChan := make(chan error, len(tt.input))
 			defer close(errChan)
 			pipeline := FromSource[int, string](
 				context.Background(),
@@ -98,7 +90,7 @@ func TestIntegrationPipeline_Out(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      []int
-		process    pipe.Processor[int]
+		process    datastreams.Processor[int]
 		wantOutput []int
 	}{
 		{
@@ -125,7 +117,7 @@ func TestIntegrationPipeline_Out(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			consumer := NewMockConsumer(tt.input)
-			errChan := make(chan pipelineErrors.Error, len(tt.input))
+			errChan := make(chan error, len(tt.input))
 			defer close(errChan)
 			pipeline := FromSource[int, int](
 				context.Background(),
@@ -142,12 +134,12 @@ func TestIntegrationPipeline_Out(t *testing.T) {
 	}
 }
 
-func TestPipeline_Sink(t *testing.T) {
+func TestIntegrationPipeline_Sink(t *testing.T) {
 	type testCase struct {
 		name            string
 		sourceData      []int
 		mockSenderSetup func(sender *mockSender[int])
-		assertions      func(sender *mockSender[int], errs <-chan pipelineErrors.Error)
+		assertions      func(sender *mockSender[int], errs <-chan error)
 	}
 
 	testCases := []testCase{
@@ -157,7 +149,7 @@ func TestPipeline_Sink(t *testing.T) {
 			mockSenderSetup: func(sender *mockSender[int]) {
 				sender.On("send", mock.Anything).Return(nil)
 			},
-			assertions: func(sender *mockSender[int], errs <-chan pipelineErrors.Error) {
+			assertions: func(sender *mockSender[int], errs <-chan error) {
 				sender.AssertCalled(t, "send", mock.Anything)
 			},
 		},
@@ -169,7 +161,7 @@ func TestPipeline_Sink(t *testing.T) {
 				sender.On("send", mock.Anything).Return(errors.New("error on 2")).Once()
 				sender.On("send", mock.Anything).Return(nil).Once()
 			},
-			assertions: func(sender *mockSender[int], errs <-chan pipelineErrors.Error) {
+			assertions: func(sender *mockSender[int], errs <-chan error) {
 				assert.Len(t, errs, 1)
 				sender.AssertCalled(t, "send", 3)
 			},
@@ -182,7 +174,7 @@ func TestPipeline_Sink(t *testing.T) {
 			sender := newMockSender[int]()
 			tc.mockSenderSetup(sender)
 
-			errorsCh := make(chan pipelineErrors.Error, 1)
+			errorsCh := make(chan error, 1)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
@@ -197,8 +189,8 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       []int
-		process     pipe.Processor[int]
-		pipeProcess pipe.Processor[int]
+		process     datastreams.Processor[int]
+		pipeProcess datastreams.Processor[int]
 		wantOutput  []int
 	}{
 		{
@@ -228,7 +220,7 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			errs := make(chan pipelineErrors.Error, len(tt.input)*3)
+			errs := make(chan error, len(tt.input)*3)
 			defer close(errs)
 
 			consumer := NewMockConsumer(tt.input)
@@ -238,7 +230,7 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 				consumer,
 				errs,
 			).Process(tt.process).
-				Tee(pipe.Params{BufferSize: len(tt.input) + 1})
+				Tee(datastreams.Params{BufferSize: len(tt.input) + 1})
 
 			var gotOutput1, gotOutput2 []int
 			for v := range out1.Out() {
@@ -260,10 +252,10 @@ func TestPipeline_ToSource(t *testing.T) {
 
 		consumer := NewMockConsumer([]int{1, 2, 3})
 
-		errors_ := make(chan pipelineErrors.Error, 1)
-		defer close(errors_)
+		errs := make(chan error, 1)
+		defer close(errs)
 
-		source := FromSource[int, string](ctx, consumer, errors_).
+		source := FromSource[int, string](ctx, consumer, errs).
 			Map(func(i int) (string, error) {
 				return string(rune('A' + i)), nil
 			}).
@@ -272,7 +264,7 @@ func TestPipeline_ToSource(t *testing.T) {
 			}).
 			ToSource()
 
-		go source.Consume(ctx, errors_)
+		go source.Consume(ctx)
 
 		var consumedValues []string
 		for v := range source.Out() {
@@ -287,10 +279,10 @@ func TestPipeline_ToSource(t *testing.T) {
 // that processes integer inputs by doubling their values and then tees the output.
 func ExamplePipeline_Tee() {
 	source := NewMockConsumer([]int{1, 2, 3, 4, 5})
-	errChan := make(chan pipelineErrors.Error)
+	errChan := make(chan error)
 	defer close(errChan)
 
-	process := func(p pipe.DataStream[int]) pipe.DataStream[int] {
+	process := func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 		return p.Run(func(v int) (int, error) {
 			return v * 2, nil
 		})
@@ -300,7 +292,7 @@ func ExamplePipeline_Tee() {
 	pipeline := FromSource[int, int](context.Background(), source, errChan).
 		With(process)
 
-	out1, out2 := pipeline.Tee(pipe.Params{BufferSize: 5})
+	out1, out2 := pipeline.Tee(datastreams.Params{BufferSize: 5})
 	// Collect and print the results from both outputs
 	for out := range out1.Out() {
 		fmt.Println("out1:", out)
@@ -325,7 +317,7 @@ func ExamplePipeline_Tee() {
 // ExamplePipeline_Map demonstrates how to create and use a simple pipeline
 // that maps one type to another.
 func ExamplePipeline_Map() {
-	errChan := make(chan pipelineErrors.Error)
+	errChan := make(chan error)
 	defer close(errChan)
 
 	source := NewMockConsumer([]int{1, 2, 3, 4, 5})
@@ -354,7 +346,7 @@ func ExamplePipeline_Map() {
 // ExamplePipeline_Sink demonstrates how to create and use a simple pipeline that
 // sinks the output of a source to a publisher
 func ExamplePipeline_Sink() {
-	errChan := make(chan pipelineErrors.Error)
+	errChan := make(chan error)
 	defer close(errChan)
 
 	source := NewMockConsumer([]int{1, 2, 3, 4, 5})
@@ -385,7 +377,7 @@ func ExamplePipeline_ToSource() {
 
 	consumer := NewMockConsumer([]int{1, 2, 3})
 
-	errors_ := make(chan pipelineErrors.Error, 1)
+	errors_ := make(chan error, 1)
 	defer close(errors_)
 
 	source := FromSource[int, string](ctx, consumer, errors_).
@@ -397,7 +389,7 @@ func ExamplePipeline_ToSource() {
 		}).
 		ToSource()
 
-	go source.Consume(ctx, errors_)
+	go source.Consume(ctx)
 
 	for v := range source.Out() {
 		fmt.Println(v)
@@ -407,4 +399,11 @@ func ExamplePipeline_ToSource() {
 	// processed B
 	// processed C
 	// processed D
+}
+
+type consoleSender struct{}
+
+func (p *consoleSender) send(v string) error {
+	fmt.Println("published:", v)
+	return nil
 }
