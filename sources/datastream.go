@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+
 	"github.com/elastiflow/pipelines/errors"
 	"github.com/elastiflow/pipelines/pipe"
 )

@@ -2,6 +2,7 @@ package pipelines
 
 import (
 	"context"
+
 	pipelineErrors "github.com/elastiflow/pipelines/errors"
 	"github.com/stretchr/testify/mock"
 )

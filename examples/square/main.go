@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/elastiflow/pipelines/errors"
-	"github.com/elastiflow/pipelines/pipe"
-	"github.com/elastiflow/pipelines/sources"
 	"log/slog"
 
 	"github.com/elastiflow/pipelines"
+	"github.com/elastiflow/pipelines/errors"
+	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/sources"
 )
 
 func createIntArr(num int) []int {

@@ -65,10 +65,10 @@ package pipelines
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/errors"
-	"github.com/elastiflow/pipelines/sources"
 
+	"github.com/elastiflow/pipelines/errors"
 	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/sources"
 )
 
 type ProcessFunc[T any] func(stream pipe.DataStream[T]) pipe.DataStream[T]

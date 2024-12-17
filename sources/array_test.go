@@ -2,8 +2,9 @@ package sources
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFromArray(t *testing.T) {

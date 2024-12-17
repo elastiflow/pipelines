@@ -2,10 +2,11 @@ package pipe
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/errors"
 	"math/rand" // nosemgrep
 	"sync"
 	"time"
+
+	"github.com/elastiflow/pipelines/errors"
 )
 
 // DataStream is a struct that defines a generic stream process stage

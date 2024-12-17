@@ -2,12 +2,12 @@ package bench
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/errors"
-	"github.com/elastiflow/pipelines/pipe"
 	"testing"
 	"time"
 
 	"github.com/elastiflow/pipelines"
+	"github.com/elastiflow/pipelines/errors"
+	"github.com/elastiflow/pipelines/pipe"
 )
 
 func BenchmarkPipelineOpen(b *testing.B) {

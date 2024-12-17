@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"time"
+
 	"github.com/elastiflow/pipelines"
 	"github.com/elastiflow/pipelines/errors"
 	"github.com/elastiflow/pipelines/pipe"
 	"github.com/elastiflow/pipelines/sources"
-	"log/slog"
-	"time"
 )
 
 func createIntArr(num int) []int {

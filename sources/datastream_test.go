@@ -2,10 +2,11 @@ package sources
 
 import (
 	"context"
+	"testing"
+
 	"github.com/elastiflow/pipelines/errors"
 	"github.com/elastiflow/pipelines/pipe"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestFromDataStream(t *testing.T) {

@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/mock"
 	"testing"
 	"time"
 
 	pipelineErrors "github.com/elastiflow/pipelines/errors"
 	"github.com/elastiflow/pipelines/pipe"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 type consoleSender struct{}

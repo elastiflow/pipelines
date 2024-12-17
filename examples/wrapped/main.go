@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/elastiflow/pipelines/errors"
-	"github.com/elastiflow/pipelines/pipe"
-	"github.com/elastiflow/pipelines/sources"
 	"log/slog"
 	"sync"
 
 	"github.com/elastiflow/pipelines"
+	"github.com/elastiflow/pipelines/errors"
+	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/sources"
 )
 
 func createIntArr(num int) []int {
@@ -85,12 +85,6 @@ func (pl *PipelineWrapper) exampleProcess(p pipe.DataStream[int]) pipe.DataStrea
 	).Run(
 		pl.squareOdds,
 	)
-}
-
-func seedPipeline(inChan chan<- int) {
-	for i := 0; i < 10; i++ {
-		inChan <- i
-	}
 }
 
 func main() {
