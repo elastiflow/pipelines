@@ -1,12 +1,30 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"github.com/elastiflow/pipelines/errors"
+	"github.com/elastiflow/pipelines/pipe"
 	"log/slog"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/pipe"
 )
+
+type IntConsumer struct {
+	num int
+	out chan int
+}
+
+func (c *IntConsumer) Consume(ctx context.Context, errs chan<- errors.Error) {
+	defer close(c.out)
+	for i := 0; i < c.num; i++ {
+		c.out <- i
+	}
+}
+
+func (c *IntConsumer) Out() <-chan int {
+	return c.out
+}
 
 func squareOdds(v int) (int, error) {
 	if v%2 == 0 {
@@ -15,7 +33,7 @@ func squareOdds(v int) (int, error) {
 	return v * v, nil
 }
 
-func exProcess(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
+func exProcess(p pipe.DataStream[int]) pipe.DataStream[int] {
 	return p.OrDone().FanOut(
 		pipe.Params{Num: 2},
 	).Run(
@@ -23,25 +41,19 @@ func exProcess(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
 	)
 }
 
-func seedPipeline(inChan chan<- int) {
-	for i := 0; i < 10; i++ {
-		inChan <- i
-	}
-}
-
 func main() {
 	inChan := make(chan int) // Setup channels and cleanup
-	errChan := make(chan error, 10)
+	errChan := make(chan errors.Error, 10)
 	defer func() {
 		close(inChan)
 		close(errChan)
 	}()
-	pl := pipelines.New[int]( // Create a new Pipeline
-		inChan,
+	pl := pipelines.FromSource[int, int]( // Create a new Pipeline
+		context.Background(),
+		&IntConsumer{num: 10, out: make(chan int, 10)},
 		errChan,
-		exProcess,
-	)
-	go func(errReceiver <-chan error) { // Handle Pipeline errors
+	).Connect(exProcess)
+	go func(errReceiver <-chan errors.Error) { // Handle Pipeline errors
 		defer pl.Close()
 		for err := range errReceiver {
 			if err != nil {
@@ -49,15 +61,20 @@ func main() {
 				// return // if you wanted to close the pipeline during error handling.
 			}
 		}
-	}(errChan)
-	go seedPipeline(inChan)
-	var i int                    // Seed Pipeline inputs
-	for out := range pl.Open() { // Read Pipeline output
-		if i == 9 {
-			slog.Info("received simple pipeline output", slog.Int("out", out))
-			return
-		}
+	}(pl.Errors())
+	for out := range pl.Out() { // Read Pipeline output
 		slog.Info("received simple pipeline output", slog.Int("out", out))
-		i++
 	}
+
+	// Output:
+	// {"out":0}
+	// {"out":1}
+	// {"out":4}
+	// {"out":9}
+	// {"out":16}
+	// {"out":25}
+	// {"out":36}
+	// {"out":49}
+	// {"out":64}
+	// {"out":81}
 }

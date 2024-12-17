@@ -15,7 +15,7 @@
 //		"sync"
 //
 //		"github.com/elastiflow/pipelines"
-//		"github.com/elastiflow/pipelines/pipe"
+//		"github.com/elastiflow/pipelines/ds"
 //	)
 //
 //	// PipelineWrapper is an example of a pipelines.Pipeline wrapper implementation. It includes shared state via counters.
@@ -87,11 +87,11 @@
 //	}
 //
 //	// exampleProcess is the pipeline.Processor method used in this example
-//	func (pl *PipelineWrapper) exampleProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
-//		return p.OrDone().FanOut(	// pipe.Pipe.OrDone will stop the pipeline if the input channel is closed
-//			pipe.Params{Num: 2},	// pipe.Pipe.FanOut will run subsequent pipe.Pipe stages in parallel
-//		).Run(						// pipe.Pipe.Run will execute the pipe.Pipe process: "squareOdds"
+//	func (pl *PipelineWrapper) exampleProcess(p ds.Pipe[int]) ds.Pipe[int] {
+//		return p.OrDone().FanOut(	// ds.Pipe.OrDone will stop the pipeline if the input channel is closed
+//			ds.Params{Num: 2},	// ds.Pipe.FanOut will run subsequent ds.Pipe stages in parallel
+//		).Run(						// ds.Pipe.Run will execute the ds.Pipe process: "squareOdds"
 //			pl.squareOdds,
-//		)							// pipe.Pipe.Out automatically FanIns to a single output channel if needed
+//		)							// ds.Pipe.Out automatically FanIns to a single output channel if needed
 //	}
 package pipelines

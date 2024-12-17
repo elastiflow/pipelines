@@ -3,33 +3,34 @@ package pipe
 import (
 	"context"
 	"fmt"
+	"github.com/elastiflow/pipelines/errors"
 	"math/rand" // nosemgrep
 	"sync"
 	"time"
 )
 
-// Pipe is a struct that defines a generic stream process stage
-type Pipe[T any, U any] struct {
+// DataStream is a struct that defines a generic stream process stage
+type DataStream[T any] struct {
 	ctx       context.Context
-	errStream chan<- error
+	errStream chan<- errors.Error
 	inStreams []<-chan T
 }
 
-// New constructs a new Pipe of a given type by passing in a pipelines.Pipeline context, registry, and IO streams
-func New[T any, U any](
+// NewDataStream constructs a new DataStream of a given type by passing in a pipelines.Pipeline context, registry, and IO streams
+func NewDataStream[T any](
 	ctx context.Context,
 	inStream <-chan T,
-	errStream chan<- error,
-) Pipe[T, U] {
-	return Pipe[T, U]{
+	errStream chan<- errors.Error,
+) DataStream[T] {
+	return DataStream[T]{
 		ctx:       ctx,
 		errStream: errStream,
 		inStreams: []<-chan T{inStream},
 	}
 }
 
-// Out the data outputted from a Pipe
-func (p Pipe[T, U]) Out() <-chan T {
+// Out the data outputted from a DataStream
+func (p DataStream[T]) Out() <-chan T {
 	if len(p.inStreams) == 1 {
 		return p.inStreams[0]
 	}
@@ -37,14 +38,14 @@ func (p Pipe[T, U]) Out() <-chan T {
 }
 
 // Run executes a user defined process function on the input stream(s)
-func (p Pipe[T, U]) Run(
-	proc ProcessorFunc[T],
+func (p DataStream[T]) Run(
+	proc Processor[T],
 	params ...Params,
-) Pipe[T, U] {
+) DataStream[T] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
-		go func(inStream <-chan T, outStream chan<- T, process ProcessorFunc[T]) {
+		go func(inStream <-chan T, outStream chan<- T, process Processor[T]) {
 			defer close(outStream)
 			for {
 				select {
@@ -56,44 +57,7 @@ func (p Pipe[T, U]) Run(
 					}
 					val, err := process(v)
 					if err != nil {
-						p.errStream <- fmt.Errorf("piper.Pipe.Run() error: %w", err)
-						if param.SkipError {
-							continue
-						}
-					}
-					select {
-					case outStream <- val:
-					case <-p.ctx.Done():
-						return
-					}
-				}
-			}
-		}(p.inStreams[i], outChannels[i], proc)
-	}
-	return nextPipe
-}
-
-// Map applies a user defined function to each value in the input stream(s)
-func (p Pipe[T, U]) Map(
-	proc TransformFunc[T, U],
-	params ...Params,
-) Pipe[U, U] {
-	param := applyParams(params...)
-	nextPipe, outChannels := p.nextU(standard, param)
-	for i := 0; i < len(p.inStreams); i++ {
-		go func(inStream <-chan T, outStream chan<- U, process TransformFunc[T, U]) {
-			defer close(outStream)
-			for {
-				select {
-				case <-p.ctx.Done():
-					return
-				case v, ok := <-inStream:
-					if !ok {
-						return
-					}
-					val, err := process(v)
-					if err != nil {
-						p.errStream <- fmt.Errorf("piper.Pipe.Run() error: %w", err)
+						p.errStream <- errors.NewSegment("process", fmt.Errorf("piper.ds.Run() error: %w", err))
 						if param.SkipError {
 							continue
 						}
@@ -111,7 +75,7 @@ func (p Pipe[T, U]) Map(
 }
 
 // Filter applies a user defined function to each value in the input stream(s) and only returns values that pass the filter
-func (p Pipe[T, U]) Filter(filter FilterFunc[T], params ...Params) Pipe[T, U] {
+func (p DataStream[T]) Filter(filter Filter[T], params ...Params) DataStream[T] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
@@ -120,7 +84,7 @@ func (p Pipe[T, U]) Filter(filter FilterFunc[T], params ...Params) Pipe[T, U] {
 			for val := range inStream {
 				pass, err := filter(val)
 				if err != nil {
-					p.errStream <- err
+					p.errStream <- errors.NewSegment("", err)
 					continue
 				}
 				if !pass {
@@ -139,9 +103,9 @@ func (p Pipe[T, U]) Filter(filter FilterFunc[T], params ...Params) Pipe[T, U] {
 }
 
 // Take a specific number of inputs from the inputStream(s)
-func (p Pipe[T, U]) Take(
+func (p DataStream[T]) Take(
 	params ...Params,
-) Pipe[T, U] {
+) DataStream[T] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
@@ -162,10 +126,10 @@ func (p Pipe[T, U]) Take(
 	return nextPipe
 }
 
-// FanOut kicks off a number of Pipe streams and round robins the input values
-func (p Pipe[T, U]) FanOut(
+// FanOut kicks off a number of DataStream streams and round robins the input values
+func (p DataStream[T]) FanOut(
 	params ...Params,
-) Pipe[T, U] {
+) DataStream[T] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(fanOut, param)
 	go func(inStream <-chan T, outStreams senders[T]) {
@@ -184,9 +148,9 @@ func (p Pipe[T, U]) FanOut(
 }
 
 // FanIn merges a slice of input streams into a single output stream
-func (p Pipe[T, U]) FanIn(
+func (p DataStream[T]) FanIn(
 	params ...Params,
-) Pipe[T, U] {
+) DataStream[T] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(fanIn, param)
 	outSenders := outChannels.Senders()
@@ -201,7 +165,7 @@ func (p Pipe[T, U]) FanIn(
 			}
 		}
 	}
-	// Select from all the channels
+	// Select from all the pipes
 	wg.Add(len(p.inStreams))
 	for _, c := range p.inStreams {
 		go multiplex(c)
@@ -215,9 +179,9 @@ func (p Pipe[T, U]) FanIn(
 }
 
 // OrDone checks to ensure that an external input stream is still running
-func (p Pipe[T, U]) OrDone(
+func (p DataStream[T]) OrDone(
 	params ...Params,
-) Pipe[T, U] {
+) DataStream[T] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
@@ -243,10 +207,10 @@ func (p Pipe[T, U]) OrDone(
 	return nextPipe
 }
 
-// Broadcast sends a copy of each value to a configurable number of new output channels
-func (p Pipe[T, U]) Broadcast(
+// Broadcast sends a copy of each value to a configurable number of new output pipes
+func (p DataStream[T]) Broadcast(
 	params ...Params,
-) Pipe[T, U] {
+) DataStream[T] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(broadcast, param)
 	go func(inStream <-chan T, outStreams senders[T]) {
@@ -265,10 +229,10 @@ func (p Pipe[T, U]) Broadcast(
 	return nextPipe
 }
 
-// Tee splits values coming in from a channel so that you can send them off into two separate Pipe outputs
-func (p Pipe[T, U]) Tee(
+// Tee splits values coming in from a channel so that you can send them off into two separate DataStream outputs
+func (p DataStream[T]) Tee(
 	params ...Params,
-) (Pipe[T, U], Pipe[T, U]) {
+) (DataStream[T], DataStream[T]) {
 	{
 		param := applyParams(params...)
 		nextPipe1, outChannels1 := p.nextT(standard, param)
@@ -295,27 +259,54 @@ func (p Pipe[T, U]) Tee(
 	}
 }
 
-func (p Pipe[T, U]) nextT(pipeType pipeType, params Params) (Pipe[T, U], channels[T]) {
-	streams := next[T](pipeType, params, len(p.inStreams))
-	return Pipe[T, U]{
-			ctx:       p.ctx,
-			errStream: p.errStream,
-			inStreams: streams.Receivers(),
-		},
-		streams
+func (p DataStream[T]) nextT(pipeType pipeType, params Params) (DataStream[T], pipes[T]) {
+	return next[T](pipeType, params, len(p.inStreams), p.ctx, p.errStream)
 }
 
-func (p Pipe[T, U]) nextU(pipeType pipeType, params Params) (Pipe[U, U], channels[U]) {
-	streams := next[U](pipeType, params, len(p.inStreams))
-	return Pipe[U, U]{
-			ctx:       p.ctx,
-			errStream: p.errStream,
-			inStreams: streams.Receivers(),
-		},
-		streams
+func Map[T any, U any](
+	ds DataStream[T],
+	transformFunc Transformer[T, U],
+	params ...Params,
+) DataStream[U] {
+	param := applyParams(params...)
+	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream)
+	for i := 0; i < len(ds.inStreams); i++ {
+		go func(inStream <-chan T, outStream chan<- U, transformer Transformer[T, U]) {
+			defer close(outStream)
+			for {
+				select {
+				case <-ds.ctx.Done():
+					return
+				case v, ok := <-inStream:
+					if !ok {
+						return
+					}
+					val, err := transformer(v)
+					if err != nil {
+						ds.errStream <- errors.NewSegment("join", fmt.Errorf("error joining streams: %v", err))
+						if param.SkipError {
+							continue
+						}
+					}
+					select {
+					case outStream <- val:
+					case <-ds.ctx.Done():
+						return
+					}
+				}
+			}
+		}(ds.inStreams[i], outChannels[i], transformFunc)
+	}
+	return nextPipe
 }
 
-func next[T any](pipeType pipeType, params Params, chanCount int) channels[T] {
+func next[T any](
+	pipeType pipeType,
+	params Params,
+	chanCount int,
+	ctx context.Context,
+	errStream chan<- errors.Error,
+) (DataStream[T], pipes[T]) {
 	switch pipeType {
 	case fanOut, broadcast:
 		chanCount = params.Num
@@ -324,9 +315,14 @@ func next[T any](pipeType pipeType, params Params, chanCount int) channels[T] {
 	default:
 	}
 
-	streams := make(channels[T], chanCount)
+	streams := make(pipes[T], chanCount)
 	streams.Initialize(params.BufferSize)
-	return streams
+	return DataStream[T]{
+			ctx:       ctx,
+			errStream: errStream,
+			inStreams: streams.Receivers(),
+		},
+		streams
 }
 
 // orDone checks to ensure that an external input stream is still running

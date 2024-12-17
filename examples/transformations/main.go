@@ -3,64 +3,81 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/elastiflow/pipelines/errors"
+	"github.com/elastiflow/pipelines/pipe"
 	"log/slog"
 
-	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines"
 )
 
-func mapFunc(v int) (string, error) {
-	return fmt.Sprintf("value: %v", v), nil
+type IntConsumer struct {
+	num int
+	out chan int
 }
 
-func postProcessFunc(p string) (string, error) {
-	return fmt.Sprintf("I was multiplied, %v", p), nil
-}
-
-func preprocessFunc(p int) (int, error) {
-	return p * 2, nil
-}
-
-func seedPipeline(inChan chan<- int) {
-	for i := 0; i < 10; i++ {
-		inChan <- i
+func (c *IntConsumer) Consume(ctx context.Context, errs chan<- errors.Error) {
+	defer close(c.out)
+	for i := 0; i < c.num; i++ {
+		c.out <- i
 	}
 }
 
+func (c *IntConsumer) Out() <-chan int {
+	return c.out
+}
+
+func squareOdds(v int) (int, error) {
+	return v * v, nil
+}
+
+func exProcess(p pipe.DataStream[int]) pipe.DataStream[int] {
+	return p.OrDone().FanOut(
+		pipe.Params{Num: 2},
+	).Run(
+		squareOdds,
+	)
+}
+
+func mapFunc(p int) (string, error) {
+	return fmt.Sprintf("Im a squared number: %d", p), nil
+}
+
 func main() {
-	inChan := make(chan int)
-	errChan := make(chan error, 10)
+	inChan := make(chan int) // Setup channels and cleanup
+	errChan := make(chan errors.Error, 10)
 	defer func() {
 		close(inChan)
 		close(errChan)
 	}()
-
-	pipe_ := pipe.New[int, string](
+	pl := pipelines.FromSource[int, string]( // Create a new Pipeline
 		context.Background(),
-		inChan,
+		&IntConsumer{num: 10, out: make(chan int, 10)},
 		errChan,
-	).FanOut(pipe.Params{Num: 3}).
-		Run(preprocessFunc).
-		Map(mapFunc).
-		Run(postProcessFunc).
-		OrDone().
-		Out()
+	).Connect(exProcess).
+		Map(mapFunc)
 
-	go func(errReceiver <-chan error) {
+	go func(errReceiver <-chan errors.Error) { // Handle Pipeline errors
+		defer pl.Close()
 		for err := range errReceiver {
 			if err != nil {
 				slog.Error("demo error: " + err.Error())
 				// return // if you wanted to close the pipeline during error handling.
 			}
 		}
-	}(errChan)
-	go seedPipeline(inChan)
-	var i int
-	for out := range pipe_ {
-		if i == 9 {
-			slog.Info("received simple pipeline output", slog.String("out", out))
-			return
-		}
+	}(pl.Errors())
+	for out := range pl.Out() { // Read Pipeline output
 		slog.Info("received simple pipeline output", slog.String("out", out))
-		i++
 	}
+
+	// Output:
+	// {"out":"I'm a squared number: 0"}
+	// {"out":"I'm a squared number: 1"}
+	// {"out":"I'm a squared number: 4"}
+	// {"out":"I'm a squared number: 9"}
+	// {"out":"I'm a squared number: 16"}
+	// {"out":"I'm a squared number: 25"}
+	// {"out":"I'm a squared number: 36"}
+	// {"out":"I'm a squared number: 49"}
+	// {"out":"I'm a squared number: 64"}
+	// {"out":"I'm a squared number: 81"}
 }

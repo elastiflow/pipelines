@@ -1,13 +1,31 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"github.com/elastiflow/pipelines/errors"
+	"github.com/elastiflow/pipelines/pipe"
 	"log/slog"
 	"sync"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/pipe"
 )
+
+type IntConsumer struct {
+	num int
+	out chan int
+}
+
+func (c *IntConsumer) Consume(ctx context.Context, errs chan<- errors.Error) {
+	defer close(c.out)
+	for i := 0; i < c.num; i++ {
+		c.out <- i
+	}
+}
+
+func (c *IntConsumer) Out() <-chan int {
+	return c.out
+}
 
 // PipelineWrapper is an example of a pipelines.Pipeline wrapper implementation. It includes shared state via counters.
 type PipelineWrapper struct {
@@ -16,7 +34,7 @@ type PipelineWrapper struct {
 	inChan      chan int
 	evenCounter int
 	oddCounter  int
-	pipeline    *pipelines.Pipeline[int]
+	pipeline    *pipelines.Pipeline[int, int]
 }
 
 // NewPipelineWrapper creates a new PipelineWrapper with counters set to 0
@@ -38,13 +56,14 @@ func (pl *PipelineWrapper) Run() {
 		close(pl.inChan)
 		close(pl.errChan)
 	}()
-	pl.pipeline = pipelines.New[int]( // Create a new Pipeline
-		pl.inChan,
-		pl.errChan,
-		pl.exampleProcess,
-	)
+	pl.pipeline = pipelines.FromSource[int, int]( // Create a new Pipeline
+		context.Background(),
+		&IntConsumer{num: 10, out: make(chan int, 10)},
+		make(chan errors.Error, 10),
+	).Connect(pl.exampleProcess)
+	defer pl.pipeline.Close()
+
 	go func(errReceiver <-chan error) { // Handle Pipeline errors
-		defer pl.pipeline.Close()
 		for err := range errReceiver {
 			if err != nil {
 				slog.Error("demo error: " + err.Error())
@@ -52,15 +71,8 @@ func (pl *PipelineWrapper) Run() {
 			}
 		}
 	}(pl.errChan)
-	go seedPipeline(pl.inChan) // Seed Pipeline inputs
-	var i int
-	for out := range pl.pipeline.Open() { // Read Pipeline output
-		if i == 9 {
-			slog.Info("received simple pipeline output", slog.Int("out", out))
-			return
-		}
+	for out := range pl.pipeline.Out() { // Read Pipeline output
 		slog.Info("received simple pipeline output", slog.Int("out", out))
-		i++
 	}
 }
 
@@ -79,7 +91,7 @@ func (pl *PipelineWrapper) squareOdds(v int) (int, error) {
 }
 
 // exampleProcess is the pipeline.ProcessorFunc method used in this example.
-func (pl *PipelineWrapper) exampleProcess(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
+func (pl *PipelineWrapper) exampleProcess(p pipe.DataStream[int]) pipe.DataStream[int] {
 	return p.OrDone().FanOut(
 		pipe.Params{Num: 2},
 	).Run(

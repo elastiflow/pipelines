@@ -1,6 +1,6 @@
 package pipe
 
-// Params are used to pass args into Pipe methods.
+// Params are used to pass args into DataStream methods.
 type Params struct {
 	Num        int
 	BufferSize int

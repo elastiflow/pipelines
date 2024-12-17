@@ -1,21 +1,23 @@
 package bench
 
 import (
+	"context"
+	"github.com/elastiflow/pipelines/errors"
+	"github.com/elastiflow/pipelines/pipe"
 	"testing"
 	"time"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/pipe"
 )
 
 func BenchmarkPipelineOpen(b *testing.B) {
 	benchmarks := []struct {
 		name    string
-		process pipelines.ProcessFunc[int]
+		process func(v pipe.DataStream[int]) pipe.DataStream[int]
 	}{
 		{
 			name: "fast pipeline",
-			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
+			process: func(p pipe.DataStream[int]) pipe.DataStream[int] {
 				return p.Run(
 					func(v int) (int, error) {
 						return v * 2, nil
@@ -26,7 +28,7 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "fast pipeline fanOut-5",
-			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
+			process: func(p pipe.DataStream[int]) pipe.DataStream[int] {
 				return p.FanOut(
 					pipe.Params{Num: 5},
 				).Run(
@@ -38,7 +40,7 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "slow pipeline",
-			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
+			process: func(p pipe.DataStream[int]) pipe.DataStream[int] {
 				return p.Run(
 					func(v int) (int, error) {
 						time.Sleep(2 * time.Millisecond)
@@ -49,7 +51,7 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "slow pipeline fanOut-5",
-			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
+			process: func(p pipe.DataStream[int]) pipe.DataStream[int] {
 				return p.FanOut(
 					pipe.Params{Num: 5},
 				).Run(
@@ -62,7 +64,7 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "slow pipeline fanOut-5 buffered-5",
-			process: func(p pipe.Pipe[int, int]) pipe.Pipe[int, int] {
+			process: func(p pipe.DataStream[int]) pipe.DataStream[int] {
 				return p.FanOut(
 					pipe.Params{Num: 5},
 				).Run(
@@ -79,23 +81,39 @@ func BenchmarkPipelineOpen(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			inputChan := make(chan int)
-			defer close(inputChan)
-			errChan := make(chan error, 1)
+			errChan := make(chan errors.Error, 1)
 			defer close(errChan)
-			pipeline := pipelines.New(
-				inputChan,
+			pipeline := pipelines.FromSource[int, int](
+				context.Background(),
+				NewBenchmarkConsumer(b.N),
 				errChan,
-				bm.process,
-			)
-			go func(pl pipelines.Pipeline[int]) {
-				for range pl.Open() {
+			).Connect(bm.process)
+			go func(pl pipelines.Pipeline[int, int]) {
+				for range pl.Out() {
 				}
 			}(*pipeline)
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				inputChan <- i
-			}
 		})
 	}
+}
+
+type BenchmarkConsumer struct {
+	num int
+	out chan int
+}
+
+func NewBenchmarkConsumer(num int) *BenchmarkConsumer {
+	return &BenchmarkConsumer{
+		num: num,
+		out: make(chan int, num),
+	}
+}
+
+func (c *BenchmarkConsumer) Consume(ctx context.Context, errs chan<- errors.Error) {
+	for i := 0; i < c.num; i++ {
+		c.out <- i
+	}
+}
+
+func (c *BenchmarkConsumer) Out() <-chan int {
+	return c.out
 }
