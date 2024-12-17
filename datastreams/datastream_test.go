@@ -1,9 +1,11 @@
-package pipe
+package datastreams
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -56,7 +58,7 @@ func TestPipe_Take(t *testing.T) {
 				close(eventStream)
 				inputStreams = append(inputStreams, eventStream)
 			}
-			pipe := Pipe[int]{
+			pipe := DataStream[int]{
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
@@ -112,7 +114,7 @@ func TestPipe_FanOut(t *testing.T) {
 				inputStream <- event
 			}
 			close(inputStream)
-			pipe := Pipe[int]{
+			pipe := DataStream[int]{
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
@@ -175,7 +177,7 @@ func TestPipe_FanIn(t *testing.T) {
 				close(eventStream)
 				inputStreams = append(inputStreams, eventStream)
 			}
-			pipe := Pipe[int]{
+			pipe := DataStream[int]{
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
@@ -235,7 +237,7 @@ func TestPipe_OrDone(t *testing.T) {
 				close(eventStream)
 				inputStreams = append(inputStreams, eventStream)
 			}
-			pipe := Pipe[int]{
+			pipe := DataStream[int]{
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
@@ -288,7 +290,7 @@ func TestPipe_Broadcast(t *testing.T) {
 				inputStream <- event
 			}
 			close(inputStream)
-			pipe := Pipe[int]{
+			pipe := DataStream[int]{
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
@@ -337,7 +339,7 @@ func TestPipe_Tee(t *testing.T) {
 				inputStream <- event
 			}
 			close(inputStream)
-			pipe := Pipe[int]{
+			pipe := DataStream[int]{
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
@@ -370,7 +372,7 @@ func TestPipe_Run(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   []int
-		process ProcessFunc[int]
+		process Processor[int]
 		params  Params
 		want    []int
 	}{
@@ -438,7 +440,7 @@ func TestPipe_Run(t *testing.T) {
 			}
 			close(inputStream)
 			errStream := make(chan error, len(tt.input))
-			pipe := Pipe[int]{
+			pipe := DataStream[int]{
 				ctx:       ctx,
 				errStream: errStream,
 				inStreams: []<-chan int{inputStream},
@@ -449,6 +451,269 @@ func TestPipe_Run(t *testing.T) {
 				got = append(got, event)
 			}
 			assert.ElementsMatch(t, tt.want, got)
+		})
+	}
+}
+
+func TestPipe_Filter(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  []int
+		filter Filter[int]
+		params Params
+		want   []int
+	}{
+		{
+			name:  "run with simple process",
+			input: []int{1, 2, 3, 4, 5},
+			filter: func(v int) (bool, error) {
+				return v%2 == 0, nil
+			},
+			params: Params{},
+			want:   []int{2, 4},
+		},
+		{
+			name:  "run with errors",
+			input: []int{1, 2, 3, 4, 5},
+			filter: func(v int) (bool, error) {
+				return true, errors.New("error")
+			},
+			params: Params{},
+			want:   []int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			inputStream := make(chan int, len(tt.input))
+			for _, event := range tt.input {
+				inputStream <- event
+			}
+			close(inputStream)
+			errStream := make(chan error, len(tt.input))
+			pipe := DataStream[int]{
+				ctx:       ctx,
+				errStream: errStream,
+				inStreams: []<-chan int{inputStream},
+			}
+			outputPipe := pipe.Filter(tt.filter, tt.params)
+			var got []int
+			for event := range outputPipe.inStreams[0] {
+				got = append(got, event)
+			}
+			assert.ElementsMatch(t, tt.want, got)
+		})
+	}
+}
+
+func TestMap(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []int
+		process Transformer[int, string]
+		params  Params
+		want    []string
+	}{
+		{
+			name:  "run with simple process",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(v int) (string, error) {
+				return fmt.Sprintf("%d", v+2), nil
+			},
+			params: Params{},
+			want:   []string{"3", "4", "5", "6", "7"},
+		},
+		{
+			name:  "run with nil params",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(v int) (string, error) {
+				return fmt.Sprintf("%d", v*2), nil
+			},
+			params: Params{},
+			want:   []string{"2", "4", "6", "8", "10"},
+		},
+		{
+			name:  "run with error process",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(v int) (string, error) {
+				if v%2 == 0 {
+					return "0", fmt.Errorf("even number error")
+				}
+				return fmt.Sprintf("%d", v), nil
+			},
+			params: Params{},
+			want:   []string{"1", "0", "3", "0", "5"},
+		},
+		{
+			name:  "run with error process skip",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(v int) (string, error) {
+				if v%2 == 0 {
+					return "", fmt.Errorf("even number error")
+				}
+				return fmt.Sprintf("%d", v), nil
+			},
+			params: Params{SkipError: true},
+			want:   []string{"1", "3", "5"},
+		},
+		{
+			name:  "run with empty input",
+			input: []int{},
+			process: func(v int) (string, error) {
+				return "", nil
+			},
+			params: Params{},
+			want:   []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			inputStream := make(chan int, len(tt.input))
+			for _, event := range tt.input {
+				inputStream <- event
+			}
+			close(inputStream)
+			//errStream := make(chan error, len(tt.input))
+			//pipe := ds[int, string]{
+			//	ctx:       ctx,
+			//	errStream: errStream,
+			//	inStreams: []<-chan int{inputStream},
+			//}
+			//outputPipe := pipe.Map(tt.process, tt.params)
+			//var got []string
+			//for event := range outputPipe.inStreams[0] {
+			//	got = append(got, event)
+			//}
+			//assert.ElementsMatch(t, tt.want, got)
+		})
+	}
+}
+
+func TestIntegration_Map(t *testing.T) {
+	tests := []struct {
+		name             string
+		processes        []Processor[int]
+		transformers     []Transformer[int, string]
+		postprocessor    []Processor[string]
+		expectedElements []string
+	}{
+		{
+			name: "process then transform the data",
+			processes: []Processor[int]{
+				func(v int) (int, error) {
+					return v * 2, nil
+				},
+			},
+			transformers: []Transformer[int, string]{
+				func(v int) (string, error) {
+					return fmt.Sprintf("dollars: %v", v), nil
+				},
+			},
+			expectedElements: []string{
+				"dollars: 0",
+				"dollars: 2",
+				"dollars: 4",
+				"dollars: 6",
+				"dollars: 8",
+			},
+		},
+		{
+			name: "map then post process the results",
+			transformers: []Transformer[int, string]{
+				func(v int) (string, error) {
+					return fmt.Sprintf("dollars: %v", v), nil
+				},
+			},
+			postprocessor: []Processor[string]{
+				func(v string) (string, error) {
+					return fmt.Sprintf("I was not multiplied, %v", v), nil
+				},
+			},
+			expectedElements: []string{
+				"I was not multiplied, dollars: 0",
+				"I was not multiplied, dollars: 1",
+				"I was not multiplied, dollars: 2",
+				"I was not multiplied, dollars: 3",
+				"I was not multiplied, dollars: 4",
+			},
+		},
+		{
+			name: "multi process to fan out map the process output",
+			processes: []Processor[int]{
+				func(v int) (int, error) {
+					return v * 2, nil
+				},
+				func(v int) (int, error) {
+					return v * v, nil
+				},
+				func(v int) (int, error) {
+					return v % 3, nil
+				},
+			},
+			transformers: []Transformer[int, string]{
+				func(v int) (string, error) {
+					return fmt.Sprintf("modulo: %v", v), nil
+				},
+			},
+			postprocessor: []Processor[string]{
+				func(v string) (string, error) {
+					return fmt.Sprintf("I'm divisible by 3, %v", v), nil
+				},
+			},
+			expectedElements: []string{
+				"I'm divisible by 3, modulo: 0",
+				"I'm divisible by 3, modulo: 1",
+				"I'm divisible by 3, modulo: 1",
+				"I'm divisible by 3, modulo: 0",
+				"I'm divisible by 3, modulo: 1",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inputChan := make(chan int)
+			errChan := make(chan error, 1)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer func() {
+				close(errChan)
+				cancel()
+			}()
+
+			go func() {
+				for num := range 5 {
+					inputChan <- num
+				}
+				close(inputChan)
+			}()
+
+			pipe := New[int](ctx, inputChan, errChan)
+			for _, process := range tt.processes {
+				pipe = pipe.Run(process)
+			}
+
+			var next_ DataStream[string]
+			for _, transformer := range tt.transformers {
+				next_ = Map(pipe, transformer)
+			}
+
+			for _, postprocessor := range tt.postprocessor {
+				next_ = next_.Run(postprocessor)
+			}
+
+			var results []string
+			for out := range next_.OrDone().Out() {
+				results = append(results, out)
+			}
+
+			assert.ElementsMatch(t, tt.expectedElements, results)
 		})
 	}
 }

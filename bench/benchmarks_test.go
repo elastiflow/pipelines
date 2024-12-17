@@ -1,34 +1,35 @@
 package bench
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/datastreams"
 )
 
 func BenchmarkPipelineOpen(b *testing.B) {
 	benchmarks := []struct {
 		name    string
-		process pipelines.ProcessFunc[int]
+		process func(v datastreams.DataStream[int]) datastreams.DataStream[int]
 	}{
 		{
 			name: "fast pipeline",
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 				return p.Run(
 					func(v int) (int, error) {
 						return v * 2, nil
 					},
-					pipe.Params{},
+					datastreams.Params{},
 				)
 			},
 		},
 		{
 			name: "fast pipeline fanOut-5",
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 				return p.FanOut(
-					pipe.Params{Num: 5},
+					datastreams.Params{Num: 5},
 				).Run(
 					func(v int) (int, error) {
 						return v * 2, nil
@@ -38,7 +39,7 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "slow pipeline",
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 				return p.Run(
 					func(v int) (int, error) {
 						time.Sleep(2 * time.Millisecond)
@@ -49,9 +50,9 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "slow pipeline fanOut-5",
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 				return p.FanOut(
-					pipe.Params{Num: 5},
+					datastreams.Params{Num: 5},
 				).Run(
 					func(v int) (int, error) {
 						time.Sleep(2 * time.Millisecond)
@@ -62,16 +63,16 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		},
 		{
 			name: "slow pipeline fanOut-5 buffered-5",
-			process: func(p pipe.Pipe[int]) pipe.Pipe[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 				return p.FanOut(
-					pipe.Params{Num: 5},
+					datastreams.Params{Num: 5},
 				).Run(
 					func(v int) (int, error) {
 						time.Sleep(2 * time.Millisecond)
 						return v * 2, nil
 					},
 				).FanIn(
-					pipe.Params{BufferSize: 5},
+					datastreams.Params{BufferSize: 5},
 				)
 			},
 		},
@@ -79,23 +80,43 @@ func BenchmarkPipelineOpen(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			inputChan := make(chan int)
-			defer close(inputChan)
 			errChan := make(chan error, 1)
 			defer close(errChan)
-			pipeline := pipelines.New(
-				inputChan,
+			pipeline := pipelines.FromSource[int, int](
+				context.Background(),
+				NewBenchmarkConsumer(b.N),
 				errChan,
-				bm.process,
-			)
-			go func(pl pipelines.Pipeline[int]) {
-				for range pl.Open() {
-				}
-			}(*pipeline)
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				inputChan <- i
+			).With(bm.process)
+			for range pipeline.Out() {
 			}
 		})
 	}
+}
+
+type BenchmarkConsumer struct {
+	num int
+	out chan int
+}
+
+func NewBenchmarkConsumer(num int) *BenchmarkConsumer {
+	return &BenchmarkConsumer{
+		num: num,
+		out: make(chan int, num),
+	}
+}
+
+func (c *BenchmarkConsumer) Consume(ctx context.Context) {
+	defer close(c.out)
+	for i := 0; i < c.num; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			c.out <- i
+		}
+	}
+}
+
+func (c *BenchmarkConsumer) Out() <-chan int {
+	return c.out
 }

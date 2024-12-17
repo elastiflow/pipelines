@@ -19,9 +19,6 @@ func createIntArr(num int) []int {
 }
 
 func squareOdds(v int) (int, error) {
-	if v%2 == 0 {
-		return v, fmt.Errorf("even number error: %v", v)
-	}
 	return v * v, nil
 }
 
@@ -33,15 +30,23 @@ func exProcess(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 	)
 }
 
-func main() {
-	errChan := make(chan error, 10)
-	defer close(errChan)
+func mapFunc(p int) (string, error) {
+	return fmt.Sprintf("Im a squared number: %d", p), nil
+}
 
-	pl := pipelines.FromSource[int, int]( // Create a new Pipeline
+func main() {
+	inChan := make(chan int) // Setup channels and cleanup
+	errChan := make(chan error, 10)
+	defer func() {
+		close(inChan)
+		close(errChan)
+	}()
+	pl := pipelines.FromSource[int, string]( // Create a new Pipeline
 		context.Background(),
 		sources.FromArray(createIntArr(10)),
 		errChan,
-	).With(exProcess)
+	).With(exProcess).
+		Map(mapFunc)
 
 	go func(errReceiver <-chan error) { // Handle Pipeline errors
 		defer pl.Close()
@@ -53,18 +58,18 @@ func main() {
 		}
 	}(pl.Errors())
 	for out := range pl.Out() { // Read Pipeline output
-		slog.Info("received simple pipeline output", slog.Int("out", out))
+		slog.Info("received simple pipeline output", slog.String("out", out))
 	}
 
 	// Output:
-	// {"out":0}
-	// {"out":1}
-	// {"out":4}
-	// {"out":9}
-	// {"out":16}
-	// {"out":25}
-	// {"out":36}
-	// {"out":49}
-	// {"out":64}
-	// {"out":81}
+	// {"out":"I'm a squared number: 0"}
+	// {"out":"I'm a squared number: 1"}
+	// {"out":"I'm a squared number: 4"}
+	// {"out":"I'm a squared number: 9"}
+	// {"out":"I'm a squared number: 16"}
+	// {"out":"I'm a squared number: 25"}
+	// {"out":"I'm a squared number: 36"}
+	// {"out":"I'm a squared number: 49"}
+	// {"out":"I'm a squared number: 64"}
+	// {"out":"I'm a squared number: 81"}
 }

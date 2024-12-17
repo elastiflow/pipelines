@@ -1,58 +1,49 @@
-package pipe
+package datastreams
 
 import (
 	"context"
-	"fmt"
 	"math/rand" // nosemgrep
 	"sync"
 	"time"
 )
 
-// Pipe is a struct that defines a generic stream process stage
-type Pipe[T any] struct {
+// DataStream is a struct that defines a generic stream process stage
+type DataStream[T any] struct {
 	ctx       context.Context
 	errStream chan<- error
 	inStreams []<-chan T
 }
 
-// New constructs a new Pipe of a given type by passing in a pipelines.Pipeline context, registry, and IO streams
+// New constructs a new DataStream of a given type by passing in a pipelines.Pipeline context, registry, and IO streams
 func New[T any](
 	ctx context.Context,
 	inStream <-chan T,
 	errStream chan<- error,
-) Pipe[T] {
-	return Pipe[T]{
+) DataStream[T] {
+	return DataStream[T]{
 		ctx:       ctx,
 		errStream: errStream,
 		inStreams: []<-chan T{inStream},
 	}
 }
 
-// Out the data outputted from a Pipe
-func (p Pipe[T]) Out() <-chan T {
+// Out the data outputted from a DataStream
+func (p DataStream[T]) Out() <-chan T {
 	if len(p.inStreams) == 1 {
 		return p.inStreams[0]
 	}
 	return p.FanIn().inStreams[0] // If multiple streams, FanIn to a single stream
 }
 
-func applyParams(params ...Params) Params {
-	var p Params
-	for _, param := range params {
-		p = param
-	}
-	return p
-}
-
 // Run executes a user defined process function on the input stream(s)
-func (p Pipe[T]) Run(
-	proc ProcessFunc[T],
+func (p DataStream[T]) Run(
+	proc Processor[T],
 	params ...Params,
-) Pipe[T] {
+) DataStream[T] {
 	param := applyParams(params...)
-	nextPipe, outChannels := p.next(standard, param)
+	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
-		go func(inStream <-chan T, outStream chan<- T, process ProcessFunc[T]) {
+		go func(inStream <-chan T, outStream chan<- T, process Processor[T]) {
 			defer close(outStream)
 			for {
 				select {
@@ -64,7 +55,7 @@ func (p Pipe[T]) Run(
 					}
 					val, err := process(v)
 					if err != nil {
-						p.errStream <- fmt.Errorf("piper.Pipe.Run() error: %w", err)
+						p.errStream <- newRunError(param.SegmentName, err)
 						if param.SkipError {
 							continue
 						}
@@ -81,12 +72,40 @@ func (p Pipe[T]) Run(
 	return nextPipe
 }
 
-// Take a specific number of inputs from the inputStream(s)
-func (p Pipe[T]) Take(
-	params ...Params,
-) Pipe[T] {
+// Filter applies a user defined function to each value in the input stream(s) and only returns values that pass the filter
+func (p DataStream[T]) Filter(filter Filter[T], params ...Params) DataStream[T] {
 	param := applyParams(params...)
-	nextPipe, outChannels := p.next(standard, param)
+	nextPipe, outChannels := p.nextT(standard, param)
+	for i := 0; i < len(p.inStreams); i++ {
+		go func(inStream <-chan T, outStream chan<- T) {
+			defer close(outStream)
+			for val := range inStream {
+				pass, err := filter(val)
+				if err != nil {
+					p.errStream <- newFilterError(param.SegmentName, err)
+					continue
+				}
+				if !pass {
+					continue
+				}
+				select {
+				case outStream <- val:
+				case <-p.ctx.Done():
+					return
+				}
+			}
+		}(p.inStreams[i], outChannels[i])
+	}
+
+	return nextPipe
+}
+
+// Take a specific number of inputs from the inputStream(s)
+func (p DataStream[T]) Take(
+	params ...Params,
+) DataStream[T] {
+	param := applyParams(params...)
+	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
 		go func(inStream <-chan T, outStream chan<- T) {
 			defer close(outStream)
@@ -105,12 +124,12 @@ func (p Pipe[T]) Take(
 	return nextPipe
 }
 
-// FanOut kicks off a number of Pipe streams and round robins the input values
-func (p Pipe[T]) FanOut(
+// FanOut kicks off a number of DataStream streams and round robins the input values
+func (p DataStream[T]) FanOut(
 	params ...Params,
-) Pipe[T] {
+) DataStream[T] {
 	param := applyParams(params...)
-	nextPipe, outChannels := p.next(fanOut, param)
+	nextPipe, outChannels := p.nextT(fanOut, param)
 	go func(inStream <-chan T, outStreams senders[T]) {
 		defer outChannels.Close()
 		// Generate a weak random int ONLY to use in load balancing between outStreams
@@ -127,11 +146,11 @@ func (p Pipe[T]) FanOut(
 }
 
 // FanIn merges a slice of input streams into a single output stream
-func (p Pipe[T]) FanIn(
+func (p DataStream[T]) FanIn(
 	params ...Params,
-) Pipe[T] {
+) DataStream[T] {
 	param := applyParams(params...)
-	nextPipe, outChannels := p.next(fanIn, param)
+	nextPipe, outChannels := p.nextT(fanIn, param)
 	outSenders := outChannels.Senders()
 	var wg sync.WaitGroup
 	multiplex := func(c <-chan T) {
@@ -144,7 +163,7 @@ func (p Pipe[T]) FanIn(
 			}
 		}
 	}
-	// Select from all the channels
+	// Select from all the pipes
 	wg.Add(len(p.inStreams))
 	for _, c := range p.inStreams {
 		go multiplex(c)
@@ -158,11 +177,11 @@ func (p Pipe[T]) FanIn(
 }
 
 // OrDone checks to ensure that an external input stream is still running
-func (p Pipe[T]) OrDone(
+func (p DataStream[T]) OrDone(
 	params ...Params,
-) Pipe[T] {
+) DataStream[T] {
 	param := applyParams(params...)
-	nextPipe, outChannels := p.next(standard, param)
+	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
 		go func(inStream <-chan T, outStream chan<- T) {
 			defer close(outStream)
@@ -186,12 +205,12 @@ func (p Pipe[T]) OrDone(
 	return nextPipe
 }
 
-// Broadcast sends a copy of each value to a configurable number of new output channels
-func (p Pipe[T]) Broadcast(
+// Broadcast sends a copy of each value to a configurable number of new output pipes
+func (p DataStream[T]) Broadcast(
 	params ...Params,
-) Pipe[T] {
+) DataStream[T] {
 	param := applyParams(params...)
-	nextPipe, outChannels := p.next(broadcast, param)
+	nextPipe, outChannels := p.nextT(broadcast, param)
 	go func(inStream <-chan T, outStreams senders[T]) {
 		defer outChannels.Close()
 		for val := range inStream {
@@ -208,14 +227,14 @@ func (p Pipe[T]) Broadcast(
 	return nextPipe
 }
 
-// Tee splits values coming in from a channel so that you can send them off into two separate Pipe outputs
-func (p Pipe[T]) Tee(
+// Tee splits values coming in from a channel so that you can send them off into two separate DataStream outputs
+func (p DataStream[T]) Tee(
 	params ...Params,
-) (Pipe[T], Pipe[T]) {
+) (DataStream[T], DataStream[T]) {
 	{
 		param := applyParams(params...)
-		nextPipe1, outChannels1 := p.next(standard, param)
-		nextPipe2, outChannels2 := p.next(standard, param)
+		nextPipe1, outChannels1 := p.nextT(standard, param)
+		nextPipe2, outChannels2 := p.nextT(standard, param)
 		for i := 0; i < len(p.inStreams); i++ {
 			go func(in <-chan T, o1 chan<- T, o2 chan<- T) {
 				defer close(o1)
@@ -238,21 +257,67 @@ func (p Pipe[T]) Tee(
 	}
 }
 
-func (p Pipe[T]) next(pipeType pipeType, params Params) (Pipe[T], channels[T]) {
-	var chanCount int
+func (p DataStream[T]) nextT(pipeType pipeType, params Params) (DataStream[T], pipes[T]) {
+	return next[T](pipeType, params, len(p.inStreams), p.ctx, p.errStream)
+}
+
+func Map[T any, U any](
+	ds DataStream[T],
+	transformFunc Transformer[T, U],
+	params ...Params,
+) DataStream[U] {
+	param := applyParams(params...)
+	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream)
+	for i := 0; i < len(ds.inStreams); i++ {
+		go func(inStream <-chan T, outStream chan<- U, transformer Transformer[T, U]) {
+			defer close(outStream)
+			for {
+				select {
+				case <-ds.ctx.Done():
+					return
+				case v, ok := <-inStream:
+					if !ok {
+						return
+					}
+					val, err := transformer(v)
+					if err != nil {
+						ds.errStream <- newMapError(param.SegmentName, err)
+						if param.SkipError {
+							continue
+						}
+					}
+					select {
+					case outStream <- val:
+					case <-ds.ctx.Done():
+						return
+					}
+				}
+			}
+		}(ds.inStreams[i], outChannels[i], transformFunc)
+	}
+	return nextPipe
+}
+
+func next[T any](
+	pipeType pipeType,
+	params Params,
+	chanCount int,
+	ctx context.Context,
+	errStream chan<- error,
+) (DataStream[T], pipes[T]) {
 	switch pipeType {
 	case fanOut, broadcast:
 		chanCount = params.Num
 	case fanIn:
 		chanCount = 1
 	default:
-		chanCount = len(p.inStreams)
 	}
-	streams := make(channels[T], chanCount)
+
+	streams := make(pipes[T], chanCount)
 	streams.Initialize(params.BufferSize)
-	return Pipe[T]{
-			ctx:       p.ctx,
-			errStream: p.errStream,
+	return DataStream[T]{
+			ctx:       ctx,
+			errStream: errStream,
 			inStreams: streams.Receivers(),
 		},
 		streams
@@ -282,4 +347,12 @@ func orDone[T any](
 		}
 	}(valStream)
 	return valStream
+}
+
+func applyParams(params ...Params) Params {
+	var p Params
+	for _, param := range params {
+		p = param
+	}
+	return p
 }

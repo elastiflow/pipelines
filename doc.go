@@ -10,32 +10,30 @@
 //	package yourpipeline
 //
 //	import (
+//		"context"
 //		"fmt"
 //		"log/slog"
 //		"sync"
 //
 //		"github.com/elastiflow/pipelines"
-//		"github.com/elastiflow/pipelines/pipe"
+//		"github.com/elastiflow/pipelines/datastreams"
+//		"github.com/elastiflow/pipelines/sources"
 //	)
 //
 //	// PipelineWrapper is an example of a pipelines.Pipeline wrapper implementation. It includes shared state via counters.
 //	type PipelineWrapper struct {
 //		mu          sync.Mutex
 //		errChan     chan error
-//		inChan      chan int
 //		evenCounter int
 //		oddCounter  int
-//		pipeline    *pipelines.Pipeline[int]
 //	}
 //
 //	// NewPipelineWrapper creates a new PipelineWrapper with counters set to 0
 //	func NewPipelineWrapper() *PipelineWrapper {
 //		// Setup channels and return PipelineWrapper
-//		inChan := make(chan int)
 //		errChan := make(chan error, 10)
 //		return &PipelineWrapper{
 //			errChan:     errChan,
-//			inChan:      inChan,
 //			evenCounter: 0,
 //			oddCounter:  0,
 //		}
@@ -43,17 +41,16 @@
 //
 //	// Run runs the PipelineWrapper
 //	func (pl *PipelineWrapper) Run() {
-//		defer func() {
-//			close(pl.inChan)
-//			close(pl.errChan)
-//		}()
-//		pl.pipeline = pipelines.New[int]( // Create a new Pipeline
-//			pl.inChan,
+//		defer close(pl.errChan)
+//
+//		pipeline_ := pipelines.FromSource[int, int]( // Create a new Pipeline
+//			context.Background(),
+//			sources.FromArray(createIntArr(10)), // Create a source to start the pipeline
 //			pl.errChan,
-//			pl.exampleProcess,
-//		)
-//		go func(errReceiver <-chan error) {	// Handle Pipeline errors
-//			defer pl.pipeline.Close()
+//		).With(pl.exampleProcess)
+//
+//		go func(errReceiver <-chan error) { // Handle Pipeline errors
+//			defer pipeline_.Close()
 //			for err := range errReceiver {
 //				if err != nil {
 //					slog.Error("demo error: " + err.Error())
@@ -61,18 +58,12 @@
 //				}
 //			}
 //		}(pl.errChan)
-//		var i int
-//		for out := range pl.pipeline.Open() {	// Read Pipeline output
-//			if i == 9 {
-//				slog.Info("received simple pipeline output", slog.Int("out", out))
-//				return
-//			}
+//
+//		for out := range pipeline_.Out() { // Read Pipeline output
 //			slog.Info("received simple pipeline output", slog.Int("out", out))
-//			i++
 //		}
 //	}
 //
-//	// squareOdds is a method used in the PipelineWrapper.exProcess method
 //	func (pl *PipelineWrapper) squareOdds(v int) (int, error) {
 //		if v%2 == 0 {
 //			pl.mu.Lock()
@@ -86,12 +77,11 @@
 //		return v * v, nil
 //	}
 //
-//	// exampleProcess is the pipeline.Processor method used in this example
-//	func (pl *PipelineWrapper) exampleProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
-//		return p.OrDone().FanOut(	// pipe.Pipe.OrDone will stop the pipeline if the input channel is closed
-//			pipe.Params{Num: 2},	// pipe.Pipe.FanOut will run subsequent pipe.Pipe stages in parallel
-//		).Run(						// pipe.Pipe.Run will execute the pipe.Pipe process: "squareOdds"
+//	func (pl *PipelineWrapper) exampleProcess(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+//		return p.OrDone().FanOut( // datastreams.DataStream.OrDone will stop the pipeline if the input channel is closed
+//			datastreams.Params{Num: 2}, // datastreams.DataStream.FanOut will run subsequent ds.Pipe stages in parallel
+//		).Run( // datastreams.DataStream.Run will execute the ds.Pipe process: "squareOdds"
 //			pl.squareOdds,
-//		)							// pipe.Pipe.Out automatically FanIns to a single output channel if needed
+//		) // datastreams.DataStream.Out automatically FanIns to a single output channel if needed
 //	}
 package pipelines

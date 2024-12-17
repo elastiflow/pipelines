@@ -6,11 +6,11 @@
 // data processing.
 //
 // The main components of this package are:
-// - Pipeline: A struct that defines a generic stream process.
-// - ProcessFunc: A function type used by Pipeline to define the sequence of pipe.Pipe operations.
+// - Pipeline: A struct that defines a generic connection of data streams.
+// - ds: A segment of a given pipeline.
 //
 // Pipeline is the main entry point for using the package. It initializes
-// and manages a sequence of Pipe. It provides methods to open
+// and manages a sequence of DataStreams. It provides methods to manage
 // the pipeline process, split a pipeline into two pipelines, and shutdown the
 // flow of data in the Pipes gracefully.
 //
@@ -25,7 +25,7 @@
 //		"github.com/elastiflow/pipelines/pipe"
 //	)
 //
-//	func duplicateProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
+//	func duplicateProcess(ds pipe.ds[int]) pipe.ds[int] {
 //		return p.Broadcast(
 //			pipe.Params{Num: 2},
 //		).FanIn() // Broadcasting by X then Fanning In will create X duplicates per T.
@@ -38,7 +38,7 @@
 //			close(inChan)
 //			close(errChan)
 //		}()
-//		pl := pipelines.New[int]( // Create a new Pipeline
+//		pl := pipelines.New[int, int]( // Create a new Pipeline
 //			inChan,
 //			errChan,
 //			duplicateProcess,
@@ -66,53 +66,120 @@ package pipelines
 import (
 	"context"
 
-	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/datastreams"
+	"github.com/elastiflow/pipelines/sources"
 )
 
-// ProcessFunc is a function type used by Pipeline to define the sequence of pipe.Pipe operations
-type ProcessFunc[T any] func(pipe.Pipe[T]) pipe.Pipe[T]
+type ProcessFunc[T any] func(stream datastreams.DataStream[T]) datastreams.DataStream[T]
 
-// Pipeline is a struct that defines a generic stream process
-type Pipeline[T any] struct {
-	process    ProcessFunc[T]
-	errorChan  chan<- error // Streams errors from the Pipeline to the caller
-	inputChan  <-chan T     // Streams input data to the Pipeline for processing
-	cancelFunc context.CancelFunc
+type Source[T any] interface {
+	Consume(ctx context.Context)
+	Out() <-chan T
 }
 
-// New constructs a new Pipeline of a given type by passing in the properties and process function
-func New[T any](
-	inChan <-chan T,
-	errChan chan<- error,
-	process ProcessFunc[T],
-) *Pipeline[T] {
-	return &Pipeline[T]{
-		process:   process,
-		inputChan: inChan,
-		errorChan: errChan,
+type Sink[T any] interface {
+	Publish(context.Context, <-chan T, chan<- error)
+}
+
+type Opts struct {
+	BufferSize int
+}
+
+// Pipeline is a struct that defines a generic stream process
+type Pipeline[T any, U any] struct {
+	ds         datastreams.DataStream[T]
+	ctx        context.Context
+	cancelFunc context.CancelFunc
+	errors     chan error
+	source     Source[T]
+}
+
+// FromSource creates a new Pipeline from a Source
+func FromSource[T any, U any](
+	ctx context.Context,
+	source Source[T],
+	errChan chan error,
+) *Pipeline[T, U] {
+	go source.Consume(ctx)
+	return &Pipeline[T, U]{
+		ctx:    ctx,
+		ds:     datastreams.New[T](ctx, source.Out(), errChan),
+		errors: errChan,
+		source: source,
 	}
 }
 
-// Open a Pipeline with a given set of parameters and return the output channel
-func (p *Pipeline[T]) Open() <-chan T {
-	ctx, cancel := context.WithCancel(context.Background())
-	p.cancelFunc = cancel
-	return p.process(
-		pipe.New[T](ctx, p.inputChan, p.errorChan),
-	).Out()
-}
-
-// Tee a Pipeline with a given set of parameters and return two output channels with copied data
-func (p *Pipeline[T]) Tee(params pipe.Params) (<-chan T, <-chan T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	p.cancelFunc = cancel
-	out1, out2 := p.process(
-		pipe.New[T](ctx, p.inputChan, p.errorChan),
-	).Tee(params)
-	return out1.Out(), out2.Out()
+// New constructs a new Pipeline of a given type by passing in the properties and process function
+func New[T any, U any](
+	ctx context.Context,
+	ds datastreams.DataStream[T],
+	errChan chan error,
+) *Pipeline[T, U] {
+	ctx, cancelFunc := context.WithCancel(ctx)
+	return &Pipeline[T, U]{
+		cancelFunc: cancelFunc,
+		ctx:        ctx,
+		ds:         datastreams.New[T](ctx, ds.Out(), errChan),
+		errors:     errChan,
+	}
 }
 
 // Close a Pipeline and safely stop processing
-func (p *Pipeline[T]) Close() {
+func (p *Pipeline[T, U]) Close() {
 	p.cancelFunc()
+}
+
+// Errors returns the error channel of the Pipeline
+func (p *Pipeline[T, U]) Errors() <-chan error {
+	return p.errors
+}
+
+// Map creates a new pipeline by applying a mapper function to each message in the stream
+func (p *Pipeline[T, U]) Map(mapper datastreams.Transformer[T, U], params ...datastreams.Params) *Pipeline[U, U] {
+	outPipe := datastreams.Map[T, U](p.ds, mapper, params...)
+	return New[U, U](p.ctx, outPipe, p.errors)
+}
+
+// With takes the current pipelines DataStream and applies a process function to it
+func (p *Pipeline[T, U]) With(process ProcessFunc[T]) *Pipeline[T, U] {
+	return New[T, U](p.ctx, process(p.ds), p.errors)
+}
+
+// Out returns the output channel of the Pipeline
+func (p *Pipeline[T, U]) Out() <-chan T {
+	return p.ds.Out()
+}
+
+// Process creates a new pipeline by applying a processor function to each message in the stream
+func (p *Pipeline[T, U]) Process(processor datastreams.Processor[T], params ...datastreams.Params) *Pipeline[T, U] {
+	return New[T, U](p.ctx, p.ds.Run(processor, params...), p.errors)
+}
+
+// Sink is a blocking operation. It will block until the sink has consumed all the messages
+func (p *Pipeline[T, U]) Sink(sink Sink[T]) {
+	sink.Publish(p.ctx, p.ds.Out(), p.errors)
+}
+
+// Tee creates a fork in the stream, allowing for two separate streams to be created from the original
+func (p *Pipeline[T, U]) Tee(params ...datastreams.Params) (*Pipeline[T, U], *Pipeline[T, U]) {
+	ds1, ds2 := p.ds.Tee(params...)
+	return New[T, U](p.ctx, ds1, p.errors),
+		New[T, U](p.ctx, ds2, p.errors)
+}
+
+// ToSource converts a Pipeline to a Source to use in other pipelines
+func (p *Pipeline[T, U]) ToSource() Source[T] {
+	return sources.FromDataStream[T](p.ds)
+}
+
+// Wait blocks until the stream has consumed all the messages
+func (p *Pipeline[T, U]) Wait() {
+	defer close(p.errors)
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-p.ds.OrDone().Out():
+		}
+	}
 }
