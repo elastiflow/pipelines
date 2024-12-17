@@ -1,4 +1,4 @@
-package pipe
+package datastreams
 
 type pipeType int
 

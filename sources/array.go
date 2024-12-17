@@ -2,8 +2,6 @@ package sources
 
 import (
 	"context"
-
-	"github.com/elastiflow/pipelines/errors"
 )
 
 // Array is a source that reads the values from an array and returns it as a channel
@@ -21,7 +19,7 @@ func FromArray[T any](slice []T) *Array[T] {
 }
 
 // Consume reads the elements the values array and sends it to the output channel
-func (s *Array[T]) Consume(ctx context.Context, errs chan<- errors.Error) {
+func (s *Array[T]) Consume(ctx context.Context) {
 	defer close(s.out)
 	for _, val := range s.values {
 		select {
@@ -35,6 +33,6 @@ func (s *Array[T]) Consume(ctx context.Context, errs chan<- errors.Error) {
 }
 
 // Out returns the output channel
-func (p *Array[T]) Out() <-chan T {
-	return p.out
+func (s *Array[T]) Out() <-chan T {
+	return s.out
 }

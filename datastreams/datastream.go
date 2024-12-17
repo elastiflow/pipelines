@@ -1,26 +1,24 @@
-package pipe
+package datastreams
 
 import (
 	"context"
 	"math/rand" // nosemgrep
 	"sync"
 	"time"
-
-	"github.com/elastiflow/pipelines/errors"
 )
 
 // DataStream is a struct that defines a generic stream process stage
 type DataStream[T any] struct {
 	ctx       context.Context
-	errStream chan<- errors.Error
+	errStream chan<- error
 	inStreams []<-chan T
 }
 
-// NewDataStream constructs a new DataStream of a given type by passing in a pipelines.Pipeline context, registry, and IO streams
-func NewDataStream[T any](
+// New constructs a new DataStream of a given type by passing in a pipelines.Pipeline context, registry, and IO streams
+func New[T any](
 	ctx context.Context,
 	inStream <-chan T,
-	errStream chan<- errors.Error,
+	errStream chan<- error,
 ) DataStream[T] {
 	return DataStream[T]{
 		ctx:       ctx,
@@ -57,7 +55,7 @@ func (p DataStream[T]) Run(
 					}
 					val, err := process(v)
 					if err != nil {
-						p.errStream <- errors.NewSegment(param.SegmentName, segmentProcess.String(), err)
+						p.errStream <- newRunError(param.SegmentName, err)
 						if param.SkipError {
 							continue
 						}
@@ -84,7 +82,7 @@ func (p DataStream[T]) Filter(filter Filter[T], params ...Params) DataStream[T] 
 			for val := range inStream {
 				pass, err := filter(val)
 				if err != nil {
-					p.errStream <- errors.NewSegment(param.SegmentName, segmentFilter.String(), err)
+					p.errStream <- newFilterError(param.SegmentName, err)
 					continue
 				}
 				if !pass {
@@ -283,7 +281,7 @@ func Map[T any, U any](
 					}
 					val, err := transformer(v)
 					if err != nil {
-						ds.errStream <- errors.NewSegment(param.SegmentName, segmentMap.String(), err)
+						ds.errStream <- newMapError(param.SegmentName, err)
 						if param.SkipError {
 							continue
 						}
@@ -305,7 +303,7 @@ func next[T any](
 	params Params,
 	chanCount int,
 	ctx context.Context,
-	errStream chan<- errors.Error,
+	errStream chan<- error,
 ) (DataStream[T], pipes[T]) {
 	switch pipeType {
 	case fanOut, broadcast:

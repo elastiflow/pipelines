@@ -1,4 +1,4 @@
-package pipe
+package datastreams
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	pipelineerror "github.com/elastiflow/pipelines/errors"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -440,7 +439,7 @@ func TestPipe_Run(t *testing.T) {
 				inputStream <- event
 			}
 			close(inputStream)
-			errStream := make(chan pipelineerror.Error, len(tt.input))
+			errStream := make(chan error, len(tt.input))
 			pipe := DataStream[int]{
 				ctx:       ctx,
 				errStream: errStream,
@@ -494,7 +493,7 @@ func TestPipe_Filter(t *testing.T) {
 				inputStream <- event
 			}
 			close(inputStream)
-			errStream := make(chan pipelineerror.Error, len(tt.input))
+			errStream := make(chan error, len(tt.input))
 			pipe := DataStream[int]{
 				ctx:       ctx,
 				errStream: errStream,
@@ -681,7 +680,7 @@ func TestIntegration_Map(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			inputChan := make(chan int)
-			errChan := make(chan pipelineerror.Error, 1)
+			errChan := make(chan error, 1)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer func() {
 				close(errChan)
@@ -695,7 +694,7 @@ func TestIntegration_Map(t *testing.T) {
 				close(inputChan)
 			}()
 
-			pipe := NewDataStream[int](ctx, inputChan, errChan)
+			pipe := New[int](ctx, inputChan, errChan)
 			for _, process := range tt.processes {
 				pipe = pipe.Run(process)
 			}

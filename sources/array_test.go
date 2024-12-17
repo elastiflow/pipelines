@@ -55,7 +55,7 @@ func TestConsume(t *testing.T) {
 
 			ctx := tt.setupContext()
 
-			newSlice.Consume(ctx, nil)
+			newSlice.Consume(ctx)
 
 			var consumed []string
 			for val := range newSlice.Out() {

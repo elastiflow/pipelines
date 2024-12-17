@@ -10,18 +10,20 @@
 //	package yourpipeline
 //
 //	import (
+//		"context"
 //		"fmt"
 //		"log/slog"
 //		"sync"
 //
 //		"github.com/elastiflow/pipelines"
-//		"github.com/elastiflow/pipelines/pipe"
+//		"github.com/elastiflow/pipelines/datastreams"
+//		"github.com/elastiflow/pipelines/sources"
 //	)
 //
 //	// PipelineWrapper is an example of a pipelines.Pipeline wrapper implementation. It includes shared state via counters.
 //	type PipelineWrapper struct {
 //		mu          sync.Mutex
-//		errChan     chan error.Error
+//		errChan     chan error
 //		evenCounter int
 //		oddCounter  int
 //	}
@@ -29,7 +31,7 @@
 //	// NewPipelineWrapper creates a new PipelineWrapper with counters set to 0
 //	func NewPipelineWrapper() *PipelineWrapper {
 //		// Setup channels and return PipelineWrapper
-//		errChan := make(chan errors.Error, 10)
+//		errChan := make(chan error, 10)
 //		return &PipelineWrapper{
 //			errChan:     errChan,
 //			evenCounter: 0,
@@ -44,10 +46,10 @@
 //		pipeline_ := pipelines.FromSource[int, int]( // Create a new Pipeline
 //			context.Background(),
 //			sources.FromArray(createIntArr(10)), // Create a source to start the pipeline
-//			errChan,
+//			pl.errChan,
 //		).With(pl.exampleProcess)
 //
-//		go func(errReceiver <-chan error) {	// Handle Pipeline errors
+//		go func(errReceiver <-chan error) { // Handle Pipeline errors
 //			defer pipeline_.Close()
 //			for err := range errReceiver {
 //				if err != nil {
@@ -57,7 +59,7 @@
 //			}
 //		}(pl.errChan)
 //
-//		for out := range pipeline_.Out() {	// Read Pipeline output
+//		for out := range pipeline_.Out() { // Read Pipeline output
 //			slog.Info("received simple pipeline output", slog.Int("out", out))
 //		}
 //	}
@@ -75,12 +77,11 @@
 //		return v * v, nil
 //	}
 //
-//
-//	func (pl *PipelineWrapper) exampleProcess(p pipe.DataStream[int]) pipe.DataStream[int] {
-//		return p.OrDone().FanOut(	// pipe.DataStream.OrDone will stop the pipeline if the input channel is closed
-//			pipe.Params{Num: 2},	// pipe.DataStream.FanOut will run subsequent ds.Pipe stages in parallel
-//		).Run(						// pipe.DataStream.Run will execute the ds.Pipe process: "squareOdds"
+//	func (pl *PipelineWrapper) exampleProcess(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+//		return p.OrDone().FanOut( // datastreams.DataStream.OrDone will stop the pipeline if the input channel is closed
+//			datastreams.Params{Num: 2}, // datastreams.DataStream.FanOut will run subsequent ds.Pipe stages in parallel
+//		).Run( // datastreams.DataStream.Run will execute the ds.Pipe process: "squareOdds"
 //			pl.squareOdds,
-//		)							// pipe.DataStream.Out automatically FanIns to a single output channel if needed
+//		) // datastreams.DataStream.Out automatically FanIns to a single output channel if needed
 //	}
 package pipelines

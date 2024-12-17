@@ -6,8 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/errors"
-	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/elastiflow/pipelines/sources"
 )
 
@@ -23,9 +22,9 @@ func squareOdds(v int) (int, error) {
 	return v * v, nil
 }
 
-func exProcess(p pipe.DataStream[int]) pipe.DataStream[int] {
+func exProcess(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 	return p.OrDone().FanOut(
-		pipe.Params{Num: 2},
+		datastreams.Params{Num: 2},
 	).Run(
 		squareOdds,
 	)
@@ -37,7 +36,7 @@ func mapFunc(p int) (string, error) {
 
 func main() {
 	inChan := make(chan int) // Setup channels and cleanup
-	errChan := make(chan errors.Error, 10)
+	errChan := make(chan error, 10)
 	defer func() {
 		close(inChan)
 		close(errChan)
@@ -49,7 +48,7 @@ func main() {
 	).With(exProcess).
 		Map(mapFunc)
 
-	go func(errReceiver <-chan errors.Error) { // Handle Pipeline errors
+	go func(errReceiver <-chan error) { // Handle Pipeline errors
 		defer pl.Close()
 		for err := range errReceiver {
 			if err != nil {

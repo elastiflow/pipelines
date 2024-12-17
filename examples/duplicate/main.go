@@ -5,8 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/errors"
-	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/elastiflow/pipelines/sources"
 )
 
@@ -18,14 +17,14 @@ func createIntArr(num int) []int {
 	return arr
 }
 
-func duplicateProcess(p pipe.DataStream[int]) pipe.DataStream[int] {
+func duplicateProcess(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 	return p.Broadcast(
-		pipe.Params{Num: 2},
+		datastreams.Params{Num: 2},
 	).FanIn() // Broadcasting by X then Fanning In will create X duplicates per T.
 }
 
 func main() {
-	errChan := make(chan errors.Error)
+	errChan := make(chan error)
 	pl := pipelines.FromSource[int, int]( // Create a new Pipeline
 		context.Background(),
 		sources.FromArray(createIntArr(10)), // Create a new Source
@@ -34,7 +33,7 @@ func main() {
 
 	defer pl.Close()
 
-	go func(errReceiver <-chan errors.Error) { // Handle Pipeline errors
+	go func(errReceiver <-chan error) { // Handle Pipeline errors
 		for err := range errReceiver {
 			if err != nil {
 				slog.Error("demo error: " + err.Error())

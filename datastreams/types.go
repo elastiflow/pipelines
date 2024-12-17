@@ -1,4 +1,4 @@
-package pipe
+package datastreams
 
 // Processor is a user defined function type used in a given DataStream stage
 type Processor[T any] func(T) (T, error)
