@@ -56,7 +56,7 @@ func newMockPublisher[T any](sender sender[T]) *publisher[T] {
 func (m *publisher[T]) Publish(ctx context.Context, in <-chan T, errs chan<- pipelineErrors.Error) {
 	for input := range in {
 		if err := m.sender.send(input); err != nil {
-			errs <- pipelineErrors.NewSegment("publisher", err)
+			errs <- pipelineErrors.NewSegment("publisher", "", err)
 		}
 	}
 }

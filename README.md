@@ -28,16 +28,16 @@ To get started with the `pipelines` module, follow these steps:
 
 ## Pipeline
 
-A pipeline is a series of data processing stages connected by channels. Each stage (pipe.Pipe) is a function that performs a specific task and passes its output to the next stage. The `pipelines` module provides a flexible way to define and manage these stages.
+A pipeline is a series of data processing stages connected by channels. Each stage (pipe.DataStream) is a function that performs a specific task and passes its output to the next stage. The `pipelines` module provides a flexible way to define and manage these stages.
 
-## Pipe
+## DataStream
 
-The `pipe.Pipe` struct is the core of the `pipelines` module. It manages the flow of data through the pipeline stages and handles errors according to the provided parameters.
+The `pipe.DataStream` struct is the core of the `pipelines` module. It manages the flow of data through the pipeline stages and handles errors according to the provided parameters.
 
 ### Key Components
 
-- **Params**: Used to pass arguments into `Pipe` methods.
-- **ProcessFunc**: A user-defined function type used in a given `Pipe` stage via the `Pipe.Run()` method.
+- **Params**: Used to pass arguments into `DataStream` methods.
+- **ProcessFunc**: A user-defined function type used in a given `DataStream` stage via the `DataStream.Run()` method.
 
 
 ### Examples
@@ -52,14 +52,24 @@ This example demonstrates how to set up a pipeline that takes a stream of intege
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
 	"github.com/elastiflow/pipelines"
+	"github.com/elastiflow/pipelines/errors"
 	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/sources"
 )
 
-// squareNumbers is a user defined pipe.Pipe function that squares an integer, will be registered and used in a pipe.Pipe.
+func createIntArr(num int) []int {
+	var arr []int
+	for i := 0; i < num; i++ {
+		arr = append(arr, i)
+	}
+	return arr
+}
+
 func squareOdds(v int) (int, error) {
 	if v%2 == 0 {
 		return v, fmt.Errorf("even number error: %v", v)
@@ -67,30 +77,25 @@ func squareOdds(v int) (int, error) {
 	return v * v, nil
 }
 
-// exampleProcess is a generic user defined pipelines.Pipeline function comprised of pipe.Pipe stages that will run in a pipelines.Pipeline.
-func exampleProcess(p pipe.Pipe[int]) pipe.Pipe[int] {
-	return p.OrDone().FanOut(   // pipe.Pipe.OrDone will stop the pipeline if the input channel is closed. 
-	    pipe.Params{Num: 2},    // pipe.Pipe.FanOut will run subsequent pipe.Pipe stages in parallel. 
-	).Run(                      // pipe.Pipe.Run will execute the pipe.Pipe process: "squareOdds". 
-	    squareOdds,
-	)                           // pipe.Pipe.Out automatically FanIns to a single output channel if needed.
+func exProcess(p pipe.DataStream[int]) pipe.DataStream[int] {
+	return p.OrDone().FanOut(
+		pipe.Params{Num: 2},
+	).Run(
+		squareOdds,
+	)
 }
 
 func main() {
-	// Setup channels and cleanup
-	inChan := make(chan int) 
-	errChan := make(chan error, 10)
-	defer func() {
-		close(inChan)
-		close(errChan)
-	}()
-	// Create a new Pipeline
-	pl := pipelines.New[int](
-		inChan, 
-		errChan, 
-		exampleProcess, 
-	) 
-	go func(errReceiver <-chan error) {             // Handle Pipeline errors
+	errChan := make(chan errors.Error, 10)
+	defer close(errChan)
+
+	pl := pipelines.FromSource[int, int]( // Create a new Pipeline
+		context.Background(),
+		sources.FromArray(createIntArr(10)), // Create a source to start the pipeline
+		errChan,
+	).With(exProcess)
+
+	go func(errReceiver <-chan errors.Error) { // Handle Pipeline errors
 		defer pl.Close()
 		for err := range errReceiver {
 			if err != nil {
@@ -98,9 +103,8 @@ func main() {
 				// return // if you wanted to close the pipeline during error handling.
 			}
 		}
-	}(errChan)
-	// Read Pipeline output
-	for out := range pl.Open() {     // Open the Pipeline and read the output.
+	}(pl.Errors())
+	for out := range pl.Out() { // Read Pipeline output
 		slog.Info("received simple pipeline output", slog.Int("out", out))
 	}
 }

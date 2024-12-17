@@ -298,7 +298,7 @@ func ExamplePipeline_Tee() {
 
 	// Create and open the pipeline
 	pipeline := FromSource[int, int](context.Background(), source, errChan).
-		Connect(process)
+		With(process)
 
 	out1, out2 := pipeline.Tee(pipe.Params{BufferSize: 5})
 	// Collect and print the results from both outputs

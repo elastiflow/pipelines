@@ -141,8 +141,8 @@ func (p *Pipeline[T, U]) Map(mapper pipe.Transformer[T, U], params ...pipe.Param
 	return New[U, U](p.ctx, outPipe, p.errors)
 }
 
-// Connect send the messages from the current pipeline to another pipeline
-func (p *Pipeline[T, U]) Connect(process ProcessFunc[T]) *Pipeline[T, U] {
+// With takes the current pipelines DataStream and applies a process function to it
+func (p *Pipeline[T, U]) With(process ProcessFunc[T]) *Pipeline[T, U] {
 	return New[T, U](p.ctx, process(p.ds), p.errors)
 }
 

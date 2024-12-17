@@ -10,7 +10,11 @@ type SegmentError struct {
 	segment string
 }
 
-func NewSegment(segment string, err error) *SegmentError {
+func NewSegment(name, defaultName string, err error) *SegmentError {
+	segment := name
+	if segment == "" {
+		segment = defaultName
+	}
 	return &SegmentError{
 		error:   err,
 		segment: segment,

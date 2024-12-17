@@ -5,25 +5,18 @@ import (
 	"fmt"
 	"github.com/elastiflow/pipelines/errors"
 	"github.com/elastiflow/pipelines/pipe"
+	"github.com/elastiflow/pipelines/sources"
 	"log/slog"
 
 	"github.com/elastiflow/pipelines"
 )
 
-type IntConsumer struct {
-	num int
-	out chan int
-}
-
-func (c *IntConsumer) Consume(ctx context.Context, errs chan<- errors.Error) {
-	defer close(c.out)
-	for i := 0; i < c.num; i++ {
-		c.out <- i
+func createIntArr(num int) []int {
+	var arr []int
+	for i := 0; i < num; i++ {
+		arr = append(arr, i)
 	}
-}
-
-func (c *IntConsumer) Out() <-chan int {
-	return c.out
+	return arr
 }
 
 func squareOdds(v int) (int, error) {
@@ -51,9 +44,9 @@ func main() {
 	}()
 	pl := pipelines.FromSource[int, string]( // Create a new Pipeline
 		context.Background(),
-		&IntConsumer{num: 10, out: make(chan int, 10)},
+		sources.FromArray(createIntArr(10)),
 		errChan,
-	).Connect(exProcess).
+	).With(exProcess).
 		Map(mapFunc)
 
 	go func(errReceiver <-chan errors.Error) { // Handle Pipeline errors

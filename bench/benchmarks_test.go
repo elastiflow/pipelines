@@ -87,11 +87,9 @@ func BenchmarkPipelineOpen(b *testing.B) {
 				context.Background(),
 				NewBenchmarkConsumer(b.N),
 				errChan,
-			).Connect(bm.process)
-			go func(pl pipelines.Pipeline[int, int]) {
-				for range pl.Out() {
-				}
-			}(*pipeline)
+			).With(bm.process)
+			for range pipeline.Out() {
+			}
 		})
 	}
 }
@@ -109,8 +107,14 @@ func NewBenchmarkConsumer(num int) *BenchmarkConsumer {
 }
 
 func (c *BenchmarkConsumer) Consume(ctx context.Context, errs chan<- errors.Error) {
+	defer close(c.out)
 	for i := 0; i < c.num; i++ {
-		c.out <- i
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			c.out <- i
+		}
 	}
 }
 

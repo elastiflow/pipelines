@@ -2,7 +2,6 @@ package pipe
 
 import (
 	"context"
-	"fmt"
 	"github.com/elastiflow/pipelines/errors"
 	"math/rand" // nosemgrep
 	"sync"
@@ -57,7 +56,7 @@ func (p DataStream[T]) Run(
 					}
 					val, err := process(v)
 					if err != nil {
-						p.errStream <- errors.NewSegment("process", fmt.Errorf("piper.ds.Run() error: %w", err))
+						p.errStream <- errors.NewSegment(param.SegmentName, segmentProcess.String(), err)
 						if param.SkipError {
 							continue
 						}
@@ -84,7 +83,7 @@ func (p DataStream[T]) Filter(filter Filter[T], params ...Params) DataStream[T] 
 			for val := range inStream {
 				pass, err := filter(val)
 				if err != nil {
-					p.errStream <- errors.NewSegment("", err)
+					p.errStream <- errors.NewSegment(param.SegmentName, segmentFilter.String(), err)
 					continue
 				}
 				if !pass {
@@ -283,7 +282,7 @@ func Map[T any, U any](
 					}
 					val, err := transformer(v)
 					if err != nil {
-						ds.errStream <- errors.NewSegment("join", fmt.Errorf("error joining streams: %v", err))
+						ds.errStream <- errors.NewSegment(param.SegmentName, segmentMap.String(), err)
 						if param.SkipError {
 							continue
 						}

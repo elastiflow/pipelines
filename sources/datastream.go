@@ -8,9 +8,8 @@ import (
 
 // Pipe is a consumer that reads a payload from an HTTP endpoint and returns it as a channel
 type Pipe[T any] struct {
-	endpoint string
-	out      chan T
-	ds       pipe.DataStream[T]
+	out chan T
+	ds  pipe.DataStream[T]
 }
 
 // FromDataStream creates a new Pipe Consumer
@@ -35,6 +34,7 @@ func (p *Pipe[T]) Consume(ctx context.Context, errs chan<- errors.Error) {
 	}
 }
 
+// Out returns the output channel
 func (p *Pipe[T]) Out() <-chan T {
 	return p.out
 }

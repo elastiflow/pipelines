@@ -36,29 +36,37 @@ func TestComponentError_Stage(t *testing.T) {
 
 func TestNewSegment(t *testing.T) {
 	type args struct {
-		segment string
-		err     error
 	}
 	tests := []struct {
-		name string
-		args args
-		want *SegmentError
+		name     string
+		segment  string
+		default_ string
+		err      error
+		want     *SegmentError
 	}{
 		{
-			name: "should return a new segment error",
-			args: args{
-				segment: "segment",
-				err:     errors.New("error"),
-			},
+			name:    "should return a new segment error",
+			segment: "segment",
+			err:     errors.New("error"),
 			want: &SegmentError{
 				error:   errors.New("error"),
 				segment: "segment",
 			},
 		},
+		{
+			name:     "should set the default name if none is provided",
+			segment:  "",
+			default_: "default",
+			err:      errors.New("error"),
+			want: &SegmentError{
+				error:   errors.New("error"),
+				segment: "default",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewSegment(tt.args.segment, tt.args.err); got.segment != tt.want.segment {
+			if got := NewSegment(tt.segment, tt.default_, tt.err); got.segment != tt.want.segment {
 				t.Errorf("NewSegment() = %v, want %v", got, tt.want)
 			}
 		})
