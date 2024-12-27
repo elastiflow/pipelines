@@ -8,9 +8,8 @@ import (
 
 // Pipe is a consumer that reads a payload from an HTTP endpoint and returns it as a channel
 type datastream[T any] struct {
-	out      chan T
-	inputDS  datastreams.DataStream[T]
-	outputDS datastreams.DataStream[T]
+	out     chan T
+	inputDS datastreams.DataStream[T]
 }
 
 // FromDataStream creates a new Pipe Consumer
