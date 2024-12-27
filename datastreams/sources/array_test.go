@@ -5,24 +5,34 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFromArray(t *testing.T) {
 	t.Run("given valid values, should return a new values", func(t *testing.T) {
 		arr := []string{"a", "b", "c"}
+		var errSender chan error
 
 		newSlice := FromArray(arr)
 
-		expected := &Array[string]{
+		expected := &array[string]{
 			values: arr,
 			out:    make(chan string, len(arr)),
 		}
-		assert.ElementsMatch(t, expected.values, newSlice.values)
-		assert.NotNil(t, newSlice.out)
+		var outVals []string
+		ds := newSlice.Source(context.Background(), errSender)
+		require.NotNil(t, ds)
+		for val := range ds.Out() {
+			outVals = append(outVals, val)
+			if len(outVals) == len(arr) {
+				break
+			}
+		}
+		assert.ElementsMatch(t, expected.values, outVals)
 	})
 }
 
-func TestConsume(t *testing.T) {
+func TestArraySource_Source(t *testing.T) {
 	testcases := []struct {
 		name         string
 		values       []string
@@ -52,13 +62,11 @@ func TestConsume(t *testing.T) {
 	for _, tt := range testcases {
 		t.Run(tt.name, func(t *testing.T) {
 			newSlice := FromArray(tt.values)
+			var errSender chan error
 
 			ctx := tt.setupContext()
-
-			newSlice.Consume(ctx)
-
 			var consumed []string
-			for val := range newSlice.Out() {
+			for val := range newSlice.Source(ctx, errSender).Out() {
 				consumed = append(consumed, val)
 			}
 

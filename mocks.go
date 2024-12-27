@@ -4,27 +4,26 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/stretchr/testify/mock"
 )
 
-type MockConsumer[T any] struct {
+type MockSource[T any] struct {
 	out      chan T
 	messages []T
 }
 
-func NewMockConsumer[T any](messages []T) *MockConsumer[T] {
+func NewMockSource[T any](messages []T) *MockSource[T] {
 	out := make(chan T, len(messages))
-	return &MockConsumer[T]{out: out, messages: messages}
+	return &MockSource[T]{out: out, messages: messages}
 }
 
-func (m *MockConsumer[T]) Consume(ctx context.Context) {
+func (m *MockSource[T]) Source(ctx context.Context, errSender chan<- error) datastreams.DataStream[T] {
 	defer close(m.out)
 	for _, msg := range m.messages {
 		m.out <- msg
 	}
-}
-func (m *MockConsumer[T]) Out() <-chan T {
-	return m.out
+	return datastreams.New[T](ctx, m.out, errSender)
 }
 
 type sender[T any] interface {
@@ -44,20 +43,21 @@ func newMockSender[T any]() *mockSender[T] {
 	return &mockSender[T]{}
 }
 
-type publisher[T any] struct {
+type sinker[T any] struct {
 	sender sender[T]
 }
 
-func newMockPublisher[T any](sender sender[T]) *publisher[T] {
-	return &publisher[T]{
+func newMockSinker[T any](sender sender[T]) datastreams.Sinker[T] {
+	return &sinker[T]{
 		sender: sender,
 	}
 }
 
-func (m *publisher[T]) Publish(ctx context.Context, in <-chan T, errs chan<- error) {
-	for input := range in {
+func (m *sinker[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+	for input := range ds.Out() {
 		if err := m.sender.send(input); err != nil {
-			errs <- fmt.Errorf("publisher error: %wr", err)
+			return fmt.Errorf("publisher error: %wr", err)
 		}
 	}
+	return nil
 }

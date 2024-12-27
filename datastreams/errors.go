@@ -12,6 +12,7 @@ const (
 	RUN ErrorCode = iota
 	FILTER
 	MAP
+	SINK
 )
 
 // String converts ErrorCode enum into a string value
@@ -20,6 +21,7 @@ func (w ErrorCode) String() string {
 		"RUN",
 		"FILTER",
 		"MAP",
+		"SINK",
 	}[w]
 }
 
@@ -61,6 +63,10 @@ func newMapError(segment string, err error) error {
 	return newError(MAP, segment, err.Error())
 }
 
+func newSinkError(segment string, err error) error {
+	return newError(SINK, segment, err.Error())
+}
+
 func isError(err error, code ErrorCode) bool {
 	return strings.Contains(
 		err.Error(),
@@ -84,4 +90,8 @@ func IsFilterError(err error) bool {
 // It returns true if the error is a MAP error, otherwise false.
 func IsMapError(err error) bool {
 	return isError(err, MAP)
+}
+
+func IsSinkError(err error) bool {
+	return isError(err, SINK)
 }

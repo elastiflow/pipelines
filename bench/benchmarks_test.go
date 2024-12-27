@@ -82,12 +82,12 @@ func BenchmarkPipelineOpen(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			errChan := make(chan error, 1)
 			defer close(errChan)
-			pipeline := pipelines.FromSource[int, int](
+			pipeline := pipelines.New[int, int](
 				context.Background(),
 				NewBenchmarkConsumer(b.N),
 				errChan,
-			).With(bm.process)
-			for range pipeline.Out() {
+			)
+			for range pipeline.Stream(bm.process).Out() {
 			}
 		})
 	}
@@ -105,18 +105,20 @@ func NewBenchmarkConsumer(num int) *BenchmarkConsumer {
 	}
 }
 
-func (c *BenchmarkConsumer) Consume(ctx context.Context) {
-	defer close(c.out)
-	for i := 0; i < c.num; i++ {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			c.out <- i
+// Source reads the payload from the HTTP endpoint and sends it to the output channel
+func (c *BenchmarkConsumer) Source(ctx context.Context, errSender chan<- error) datastreams.DataStream[int] {
+	outChan := make(chan int, c.num)
+	ds := datastreams.New[int](ctx, outChan, errSender)
+	go func(outSender chan<- int) {
+		defer close(outSender)
+		for i := 0; i < c.num; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				outSender <- i
+			}
 		}
-	}
-}
-
-func (c *BenchmarkConsumer) Out() <-chan int {
-	return c.out
+	}(outChan)
+	return ds
 }

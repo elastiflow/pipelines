@@ -67,19 +67,11 @@ import (
 	"context"
 
 	"github.com/elastiflow/pipelines/datastreams"
-	"github.com/elastiflow/pipelines/sources"
+	"github.com/elastiflow/pipelines/datastreams/sources"
 )
 
-type ProcessFunc[T any] func(stream datastreams.DataStream[T]) datastreams.DataStream[T]
-
-type Source[T any] interface {
-	Consume(ctx context.Context)
-	Out() <-chan T
-}
-
-type Sink[T any] interface {
-	Publish(context.Context, <-chan T, chan<- error)
-}
+// StreamFunc is a function that takes a datastreams.DataStream and returns a datastreams.DataStream
+type StreamFunc[T any, U any] func(stream datastreams.DataStream[T]) datastreams.DataStream[U]
 
 type Opts struct {
 	BufferSize int
@@ -87,40 +79,25 @@ type Opts struct {
 
 // Pipeline is a struct that defines a generic stream process
 type Pipeline[T any, U any] struct {
-	ds         datastreams.DataStream[T]
+	sourceDS   datastreams.DataStream[T]
+	sinkDS     datastreams.DataStream[U]
 	ctx        context.Context
 	cancelFunc context.CancelFunc
-	errors     chan error
-	source     Source[T]
+	errorChan  chan error
 }
 
-// FromSource creates a new Pipeline from a Source
-func FromSource[T any, U any](
-	ctx context.Context,
-	source Source[T],
-	errChan chan error,
-) *Pipeline[T, U] {
-	go source.Consume(ctx)
-	return &Pipeline[T, U]{
-		ctx:    ctx,
-		ds:     datastreams.New[T](ctx, source.Out(), errChan),
-		errors: errChan,
-		source: source,
-	}
-}
-
-// New constructs a new Pipeline of a given type by passing in the properties and process function
+// New constructs a new Pipeline of a given type by passing in a datastreams.Sourcer
 func New[T any, U any](
 	ctx context.Context,
-	ds datastreams.DataStream[T],
-	errChan chan error,
+	sourcer datastreams.Sourcer[T],
+	errStream chan error,
 ) *Pipeline[T, U] {
 	ctx, cancelFunc := context.WithCancel(ctx)
 	return &Pipeline[T, U]{
 		cancelFunc: cancelFunc,
 		ctx:        ctx,
-		ds:         datastreams.New[T](ctx, ds.Out(), errChan),
-		errors:     errChan,
+		sourceDS:   sourcer.Source(ctx, errStream),
+		errorChan:  errStream,
 	}
 }
 
@@ -131,55 +108,67 @@ func (p *Pipeline[T, U]) Close() {
 
 // Errors returns the error channel of the Pipeline
 func (p *Pipeline[T, U]) Errors() <-chan error {
-	return p.errors
+	return p.errorChan
 }
 
 // Map creates a new pipeline by applying a mapper function to each message in the stream
-func (p *Pipeline[T, U]) Map(mapper datastreams.Transformer[T, U], params ...datastreams.Params) *Pipeline[U, U] {
-	outPipe := datastreams.Map[T, U](p.ds, mapper, params...)
-	return New[U, U](p.ctx, outPipe, p.errors)
+func (p *Pipeline[T, U]) Map(
+	mapper datastreams.TransformFunc[T, U],
+	params ...datastreams.Params,
+) datastreams.DataStream[U] {
+	return datastreams.Map[T, U](p.sourceDS, mapper, params...)
 }
 
-// With takes the current pipelines DataStream and applies a process function to it
-func (p *Pipeline[T, U]) With(process ProcessFunc[T]) *Pipeline[T, U] {
-	return New[T, U](p.ctx, process(p.ds), p.errors)
+// Stream inputs a streamFunc, starts the Pipeline, and returns the sink datastreams.DataStream
+func (p *Pipeline[T, U]) Stream(streamFunc StreamFunc[T, U]) datastreams.DataStream[U] {
+	p.sinkDS = streamFunc(p.sourceDS)
+	return p.sinkDS
 }
 
-// Out returns the output channel of the Pipeline
-func (p *Pipeline[T, U]) Out() <-chan T {
-	return p.ds.Out()
+// Start inputs a streamFunc, starts the Pipeline, and returns the Pipeline
+func (p *Pipeline[T, U]) Start(streamFunc StreamFunc[T, U]) *Pipeline[T, U] {
+	p.sinkDS = streamFunc(p.sourceDS)
+	return p
+}
+
+// Sink inputs a Sinker and returns the error channel
+func (p *Pipeline[T, U]) Sink(sinker datastreams.Sinker[U]) error {
+	return sinker.Sink(p.ctx, p.sinkDS)
+}
+
+// In returns the input channel of the source datastreams.DataStream of a Pipeline
+func (p *Pipeline[T, U]) In() <-chan T {
+	return p.sourceDS.Out()
+}
+
+// Out returns the output channel of the source datastreams.DataStream of a Pipeline
+func (p *Pipeline[T, U]) Out() <-chan U {
+	return p.sinkDS.Out()
 }
 
 // Process creates a new pipeline by applying a processor function to each message in the stream
-func (p *Pipeline[T, U]) Process(processor datastreams.Processor[T], params ...datastreams.Params) *Pipeline[T, U] {
-	return New[T, U](p.ctx, p.ds.Run(processor, params...), p.errors)
+func (p *Pipeline[T, U]) Process(processor datastreams.ProcessFunc[T], params ...datastreams.Params) *Pipeline[T, U] {
+	return New[T, U](p.ctx, sources.FromDataStream(p.sourceDS.Run(processor, params...)), p.errorChan)
 }
 
-// Sink is a blocking operation. It will block until the sink has consumed all the messages
-func (p *Pipeline[T, U]) Sink(sink Sink[T]) {
-	sink.Publish(p.ctx, p.ds.Out(), p.errors)
+// Tee creates a fork in the datastreams.DataStream, allowing for two separate streams to be created from the original
+func (p *Pipeline[T, U]) Tee(params ...datastreams.Params) (datastreams.DataStream[U], datastreams.DataStream[U]) {
+	return p.sinkDS.Tee(params...)
 }
 
-// Tee creates a fork in the stream, allowing for two separate streams to be created from the original
-func (p *Pipeline[T, U]) Tee(params ...datastreams.Params) (*Pipeline[T, U], *Pipeline[T, U]) {
-	ds1, ds2 := p.ds.Tee(params...)
-	return New[T, U](p.ctx, ds1, p.errors),
-		New[T, U](p.ctx, ds2, p.errors)
-}
-
-// ToSource converts a Pipeline to a Source to use in other pipelines
-func (p *Pipeline[T, U]) ToSource() Source[T] {
-	return sources.FromDataStream[T](p.ds)
+// ToSource converts a Pipeline to a Source to use in another Pipeline
+func (p *Pipeline[T, U]) ToSource() datastreams.Sourcer[U] {
+	return sources.FromDataStream[U](p.sinkDS)
 }
 
 // Wait blocks until the stream has consumed all the messages
 func (p *Pipeline[T, U]) Wait() {
-	defer close(p.errors)
+	defer close(p.errorChan)
 	for {
 		select {
 		case <-p.ctx.Done():
 			return
-		case <-p.ds.OrDone().Out():
+		case <-p.sourceDS.OrDone().Out():
 		}
 	}
 }

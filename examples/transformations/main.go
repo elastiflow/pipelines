@@ -7,7 +7,7 @@ import (
 
 	"github.com/elastiflow/pipelines"
 	"github.com/elastiflow/pipelines/datastreams"
-	"github.com/elastiflow/pipelines/sources"
+	"github.com/elastiflow/pipelines/datastreams/sources"
 )
 
 func createIntArr(num int) []int {
@@ -22,14 +22,6 @@ func squareOdds(v int) (int, error) {
 	return v * v, nil
 }
 
-func exProcess(p datastreams.DataStream[int]) datastreams.DataStream[int] {
-	return p.OrDone().FanOut(
-		datastreams.Params{Num: 2},
-	).Run(
-		squareOdds,
-	)
-}
-
 func mapFunc(p int) (string, error) {
 	return fmt.Sprintf("Im a squared number: %d", p), nil
 }
@@ -41,12 +33,20 @@ func main() {
 		close(inChan)
 		close(errChan)
 	}()
-	pl := pipelines.FromSource[int, string]( // Create a new Pipeline
+	pl := pipelines.New[int, string]( // Create a new Pipeline
 		context.Background(),
 		sources.FromArray(createIntArr(10)),
 		errChan,
-	).With(exProcess).
-		Map(mapFunc)
+	).Start(func(p datastreams.DataStream[int]) datastreams.DataStream[string] {
+		return datastreams.Map(
+			p.OrDone().FanOut(
+				datastreams.Params{Num: 2},
+			).Run(
+				squareOdds,
+			),
+			mapFunc,
+		)
+	})
 
 	go func(errReceiver <-chan error) { // Handle Pipeline errors
 		defer pl.Close()

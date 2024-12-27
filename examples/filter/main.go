@@ -8,7 +8,7 @@ import (
 
 	"github.com/elastiflow/pipelines"
 	"github.com/elastiflow/pipelines/datastreams"
-	"github.com/elastiflow/pipelines/sources"
+	"github.com/elastiflow/pipelines/datastreams/sources"
 )
 
 func createIntArr(num int) []int {
@@ -35,15 +35,20 @@ func main() {
 		cancel()
 	}()
 
-	connector := func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
-		return p.FanOut(datastreams.Params{Num: 3}).Filter(filter)
-	}
-
-	pl := pipelines.FromSource[int, string](
+	pl := pipelines.New[int, string](
 		ctx,
 		sources.FromArray(createIntArr(10)),
 		errChan,
-	).With(connector).Map(mapFunc)
+	).Start(func(p datastreams.DataStream[int]) datastreams.DataStream[string] {
+		return datastreams.Map(
+			p.FanOut(
+				datastreams.Params{Num: 3},
+			).Filter(
+				filter,
+			),
+			mapFunc,
+		)
+	})
 
 	for val := range pl.Out() {
 		slog.Info("received simple pipeline output", slog.String("out", val))

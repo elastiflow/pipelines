@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/elastiflow/pipelines/datastreams"
+	"github.com/elastiflow/pipelines/datastreams/sinks"
+	"github.com/elastiflow/pipelines/datastreams/sources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -16,9 +18,9 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       []int
-		preprocess  []datastreams.Processor[int]
-		mapFunc     datastreams.Transformer[int, string]
-		postprocess []datastreams.Processor[string]
+		preprocess  []datastreams.ProcessFunc[int]
+		mapFunc     datastreams.TransformFunc[int, string]
+		postprocess []datastreams.ProcessFunc[string]
 		wantStrings []string
 	}{
 		{
@@ -32,7 +34,7 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 		{
 			name:  "map with a preprocess ",
 			input: []int{1, 2, 3, 4, 5},
-			preprocess: []datastreams.Processor[int]{func(p int) (int, error) {
+			preprocess: []datastreams.ProcessFunc[int]{func(p int) (int, error) {
 				return p * 2, nil
 			}},
 			mapFunc: func(p int) (string, error) {
@@ -43,13 +45,13 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 		{
 			name:  "map with a preprocess and postprocess",
 			input: []int{1, 2, 3, 4, 5},
-			preprocess: []datastreams.Processor[int]{func(p int) (int, error) {
+			preprocess: []datastreams.ProcessFunc[int]{func(p int) (int, error) {
 				return p * 2, nil
 			}},
 			mapFunc: func(p int) (string, error) {
 				return fmt.Sprintf("I'm a string %d", p), nil
 			},
-			postprocess: []datastreams.Processor[string]{func(p string) (string, error) {
+			postprocess: []datastreams.ProcessFunc[string]{func(p string) (string, error) {
 				return p + "!", nil
 			}},
 			wantStrings: []string{"I'm a string 2!", "I'm a string 4!", "I'm a string 6!", "I'm a string 8!", "I'm a string 10!"},
@@ -58,10 +60,10 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			consumer := NewMockConsumer(tt.input)
+			consumer := NewMockSource(tt.input)
 			errChan := make(chan error, len(tt.input))
 			defer close(errChan)
-			pipeline := FromSource[int, string](
+			pipeline := New[int, string](
 				context.Background(),
 				consumer,
 				errChan,
@@ -73,7 +75,7 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 
 			transformed := pipeline.Map(tt.mapFunc)
 			for _, p := range tt.postprocess {
-				transformed = transformed.Process(p)
+				transformed = transformed.Run(p)
 			}
 
 			var gotStrings []string
@@ -90,7 +92,7 @@ func TestIntegrationPipeline_Out(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      []int
-		process    datastreams.Processor[int]
+		process    datastreams.ProcessFunc[int]
 		wantOutput []int
 	}{
 		{
@@ -116,17 +118,17 @@ func TestIntegrationPipeline_Out(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			consumer := NewMockConsumer(tt.input)
+			consumer := NewMockSource(tt.input)
 			errChan := make(chan error, len(tt.input))
 			defer close(errChan)
-			pipeline := FromSource[int, int](
+			pipeline := New[int, int](
 				context.Background(),
 				consumer,
 				errChan,
 			).Process(tt.process)
 
 			var gotOutput []int
-			for v := range pipeline.Out() {
+			for v := range pipeline.In() {
 				gotOutput = append(gotOutput, v)
 			}
 			assert.ElementsMatch(t, tt.wantOutput, gotOutput)
@@ -162,15 +164,15 @@ func TestIntegrationPipeline_Sink(t *testing.T) {
 				sender.On("send", mock.Anything).Return(nil).Once()
 			},
 			assertions: func(sender *mockSender[int], errs <-chan error) {
-				assert.Len(t, errs, 1)
-				sender.AssertCalled(t, "send", 3)
+				assert.Len(t, errs, 0)
+				sender.AssertCalled(t, "send", 1)
 			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			consumer := NewMockConsumer(tc.sourceData)
+			source := NewMockSource(tc.sourceData)
 			sender := newMockSender[int]()
 			tc.mockSenderSetup(sender)
 
@@ -178,8 +180,16 @@ func TestIntegrationPipeline_Sink(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			pipeline := FromSource[int, string](ctx, consumer, errorsCh)
-			pipeline.Sink(newMockPublisher[int](sender))
+			pipeline := New[int, int](ctx, source, errorsCh).Start(
+				func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+					return p.Run(
+						func(v int) (int, error) {
+							return v, nil
+						},
+					)
+				},
+			)
+			_ = pipeline.Sink(newMockSinker[int](sender))
 			tc.assertions(sender, pipeline.Errors())
 		})
 	}
@@ -189,29 +199,41 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       []int
-		process     datastreams.Processor[int]
-		pipeProcess datastreams.Processor[int]
+		process     StreamFunc[int, int]
+		pipeProcess StreamFunc[int, int]
 		wantOutput  []int
 	}{
 		{
 			name:  "simple process",
 			input: []int{1, 2, 3, 4, 5},
-			process: func(v int) (int, error) {
-				return v * 2, nil
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return p.Run(
+					func(v int) (int, error) {
+						return v * 2, nil
+					},
+				)
 			},
-			pipeProcess: func(v int) (int, error) {
-				return v * 2, nil
+			pipeProcess: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return p.Run(
+					func(v int) (int, error) {
+						return v * 2, nil
+					},
+				)
 			},
 			wantOutput: []int{2, 4, 6, 8, 10},
 		},
 		{
 			name:  "process with error",
 			input: []int{1, 2, 3, 4, 5},
-			process: func(v int) (int, error) {
-				if v%2 == 0 {
-					return 0, fmt.Errorf("even number error")
-				}
-				return v, nil
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return p.Run(
+					func(v int) (int, error) {
+						if v%2 == 0 {
+							return 0, fmt.Errorf("even number error")
+						}
+						return v, nil
+					},
+				)
 			},
 			wantOutput: []int{1, 0, 3, 0, 5},
 		},
@@ -222,16 +244,14 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 			t.Parallel()
 			errs := make(chan error, len(tt.input)*3)
 			defer close(errs)
-
-			consumer := NewMockConsumer(tt.input)
-
-			out1, out2 := FromSource[int, int](
+			consumer := NewMockSource(tt.input)
+			out1, out2 := New[int, int](
 				context.Background(),
 				consumer,
 				errs,
-			).Process(tt.process).
-				Tee(datastreams.Params{BufferSize: len(tt.input) + 1})
-
+			).Start(
+				tt.process,
+			).Tee(datastreams.Params{BufferSize: len(tt.input) + 1})
 			var gotOutput1, gotOutput2 []int
 			for v := range out1.Out() {
 				gotOutput1 = append(gotOutput1, v)
@@ -250,24 +270,26 @@ func TestPipeline_ToSource(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		consumer := NewMockConsumer([]int{1, 2, 3})
+		consumer := NewMockSource([]int{1, 2, 3})
 
 		errs := make(chan error, 1)
 		defer close(errs)
 
-		source := FromSource[int, string](ctx, consumer, errs).
-			Map(func(i int) (string, error) {
-				return string(rune('A' + i)), nil
-			}).
-			Process(func(s string) (string, error) {
-				return "processed " + s, nil
-			}).
-			ToSource()
-
-		go source.Consume(ctx)
-
+		streamProc := func(p datastreams.DataStream[int]) datastreams.DataStream[string] {
+			return datastreams.Map(
+				p,
+				func(i int) (string, error) { return string(rune('A' + i)), nil },
+			).Run(
+				func(s string) (string, error) {
+					return "processed " + s, nil
+				},
+			)
+		}
+		source := New[int, string](ctx, consumer, errs).Start(
+			streamProc,
+		).ToSource()
 		var consumedValues []string
-		for v := range source.Out() {
+		for v := range source.Source(ctx, errs).Out() {
 			consumedValues = append(consumedValues, v)
 		}
 		assert.ElementsMatch(t, consumedValues, []string{"processed B", "processed C", "processed D"})
@@ -275,24 +297,113 @@ func TestPipeline_ToSource(t *testing.T) {
 	})
 }
 
-// ExamplePipeline_Tee demonstrates how to create and use a simple pipeline
+// ExamplePipeline_Stream demonstrates how to create and use a simple Pipeline
+// that processes integer inputs by doubling their values and then returns an output datastreams.DataStream.
+func ExamplePipeline_Stream() {
+	errChan := make(chan error, 3)
+	defer close(errChan)
+	inChan := make(chan int, 5)
+
+	// Create and open the pipeline
+	ds := New[int, int](
+		context.Background(),
+		sources.FromChannel(inChan, sources.Params{BufferSize: 5}),
+		errChan,
+	).Stream(
+		func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+			return p.Run(
+				func(v int) (int, error) {
+					return v * 2, nil
+				},
+				datastreams.Params{BufferSize: 5},
+			)
+		},
+	)
+
+	// Send values to the pipeline's source channel
+	go func() {
+		arr := []int{1, 2, 3, 4, 5}
+		for _, val := range arr {
+			inChan <- val
+		}
+		close(inChan)
+	}()
+
+	for out := range ds.Out() {
+		fmt.Println("out:", out)
+	}
+
+	// Output:
+	// out: 2
+	// out: 4
+	// out: 6
+	// out: 8
+	// out: 10
+}
+
+// ExamplePipeline_Start demonstrates how to create and use a simple Pipeline
+// that processes integer inputs by doubling their values and then returns an output Pipeline.
+func ExamplePipeline_Start() {
+	errChan := make(chan error, 3)
+	defer close(errChan)
+	inChan := make(chan int, 5)
+
+	// Create and open the pipeline
+	pl := New[int, int](
+		context.Background(),
+		sources.FromChannel(inChan, sources.Params{BufferSize: 5}),
+		errChan,
+	).Start(
+		func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+			return p.Run(
+				func(v int) (int, error) {
+					return v * 2, nil
+				},
+				datastreams.Params{BufferSize: 5},
+			)
+		},
+	)
+
+	// Send values to the pipeline's source channel
+	go func() {
+		arr := []int{1, 2, 3, 4, 5}
+		for _, val := range arr {
+			inChan <- val
+		}
+		close(inChan)
+	}()
+
+	for out := range pl.Out() {
+		fmt.Println("out:", out)
+	}
+
+	// Output:
+	// out: 2
+	// out: 4
+	// out: 6
+	// out: 8
+	// out: 10
+}
+
+// ExamplePipeline_Tee demonstrates how to create and use a simple Pipeline
 // that processes integer inputs by doubling their values and then tees the output.
 func ExamplePipeline_Tee() {
-	source := NewMockConsumer([]int{1, 2, 3, 4, 5})
 	errChan := make(chan error)
 	defer close(errChan)
 
-	process := func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
-		return p.Run(func(v int) (int, error) {
-			return v * 2, nil
-		})
-	}
-
 	// Create and open the pipeline
-	pipeline := FromSource[int, int](context.Background(), source, errChan).
-		With(process)
+	out1, out2 := New[int, int](
+		context.Background(),
+		sources.FromArray([]int{1, 2, 3, 4, 5}),
+		errChan,
+	).Start(
+		func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+			return p.Run(func(v int) (int, error) {
+				return v * 2, nil
+			})
+		},
+	).Tee(datastreams.Params{BufferSize: 5})
 
-	out1, out2 := pipeline.Tee(datastreams.Params{BufferSize: 5})
 	// Collect and print the results from both outputs
 	for out := range out1.Out() {
 		fmt.Println("out1:", out)
@@ -314,22 +425,21 @@ func ExamplePipeline_Tee() {
 	// out2: 10
 }
 
-// ExamplePipeline_Map demonstrates how to create and use a simple pipeline
+// ExamplePipeline_Map demonstrates how to create and use a simple Pipeline
 // that maps one type to another.
 func ExamplePipeline_Map() {
 	errChan := make(chan error)
 	defer close(errChan)
 
-	source := NewMockConsumer([]int{1, 2, 3, 4, 5})
-	mapFunc := func(p int) (string, error) {
-		return fmt.Sprintf("Im a string now: %d", p), nil
-	}
-
-	pl := FromSource[int, string]( // Create a new Pipeline
+	pl := New[int, string]( // Create a new Pipeline
 		context.Background(),
-		source,
+		sources.FromArray([]int{1, 2, 3, 4, 5}),
 		errChan,
-	).Map(mapFunc)
+	).Map(
+		func(p int) (string, error) {
+			return fmt.Sprintf("Im a string now: %d", p), nil
+		},
+	)
 
 	for out := range pl.Out() { // Read Pipeline output
 		fmt.Println("out:", out)
@@ -343,23 +453,33 @@ func ExamplePipeline_Map() {
 	// out: Im a string now: 5
 }
 
-// ExamplePipeline_Sink demonstrates how to create and use a simple pipeline that
-// sinks the output of a source to a publisher
+// ExamplePipeline_Sink demonstrates how to create and use a simple Pipeline that
+// sinks the output to a sinks.ToChannel
 func ExamplePipeline_Sink() {
 	errChan := make(chan error)
-	defer close(errChan)
+	outChan := make(chan string)
+	go func() {
+		for out := range outChan { // Read Pipeline output
+			fmt.Println("published:", out)
+		}
+	}()
 
-	source := NewMockConsumer([]int{1, 2, 3, 4, 5})
-	mapFunc := func(p int) (string, error) {
-		return fmt.Sprintf("Im a string now: %d", p), nil
-	}
-
-	FromSource[int, string]( // Create a new Pipeline
+	if err := New[int, string]( // Create a new Pipeline
 		context.Background(),
-		source,
+		sources.FromArray([]int{1, 2, 3, 4, 5}),
 		errChan,
-	).Map(mapFunc).
-		Sink(newMockPublisher[string](&consoleSender{}))
+	).Start(
+		func(p datastreams.DataStream[int]) datastreams.DataStream[string] {
+			return datastreams.Map(
+				p,
+				func(p int) (string, error) { return fmt.Sprintf("Im a string now: %d", p), nil },
+			)
+		},
+	).Sink(
+		sinks.ToChannel(outChan),
+	); err != nil {
+		fmt.Println("error sinking:", err)
+	}
 
 	// Output:
 	// published: Im a string now: 1
@@ -369,29 +489,30 @@ func ExamplePipeline_Sink() {
 	// published: Im a string now: 5
 }
 
-// ExamplePipeline_ToSource demonstrates how to turn a pipeline into a source
-// to be used in another pipeline.
+// ExamplePipeline_ToSource demonstrates how to turn a Pipeline into a source
+// to be used in another Pipeline.
 func ExamplePipeline_ToSource() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-
-	consumer := NewMockConsumer([]int{1, 2, 3})
-
-	errors_ := make(chan error, 1)
-	defer close(errors_)
-
-	source := FromSource[int, string](ctx, consumer, errors_).
-		Map(func(i int) (string, error) {
-			return string(rune('A' + i)), nil
-		}).
-		Process(func(s string) (string, error) {
-			return "processed " + s, nil
-		}).
-		ToSource()
-
-	go source.Consume(ctx)
-
-	for v := range source.Out() {
+	errChan := make(chan error, 1)
+	defer close(errChan)
+	source := New[int, string](
+		ctx,
+		sources.FromArray([]int{1, 2, 3}),
+		errChan,
+	).Start(
+		func(p datastreams.DataStream[int]) datastreams.DataStream[string] {
+			return datastreams.Map(
+				p,
+				func(i int) (string, error) { return string(rune('A' + i)), nil },
+			).Run(
+				func(s string) (string, error) {
+					return "processed " + s, nil
+				},
+			)
+		},
+	).ToSource()
+	for v := range source.Source(ctx, errChan).Out() {
 		fmt.Println(v)
 	}
 
@@ -399,11 +520,4 @@ func ExamplePipeline_ToSource() {
 	// processed B
 	// processed C
 	// processed D
-}
-
-type consoleSender struct{}
-
-func (p *consoleSender) send(v string) error {
-	fmt.Println("published:", v)
-	return nil
 }

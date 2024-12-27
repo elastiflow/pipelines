@@ -6,7 +6,7 @@ import (
 
 	"github.com/elastiflow/pipelines"
 	"github.com/elastiflow/pipelines/datastreams"
-	"github.com/elastiflow/pipelines/sources"
+	"github.com/elastiflow/pipelines/datastreams/sources"
 )
 
 func createIntArr(num int) []int {
@@ -25,11 +25,11 @@ func duplicateProcess(p datastreams.DataStream[int]) datastreams.DataStream[int]
 
 func main() {
 	errChan := make(chan error)
-	pl := pipelines.FromSource[int, int]( // Create a new Pipeline
+	pl := pipelines.New[int, int]( // Create a new Pipeline
 		context.Background(),
 		sources.FromArray(createIntArr(10)), // Create a new Source
 		errChan,
-	).With(duplicateProcess)
+	).Start(duplicateProcess)
 
 	defer pl.Close()
 
@@ -65,6 +65,7 @@ func main() {
 	 received simple pipeline output out=7
 	 received simple pipeline output out=8
 	 received simple pipeline output out=8
+	 received simple pipeline output out=9
 	 received simple pipeline output out=9
 	*/
 

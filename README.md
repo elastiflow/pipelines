@@ -28,17 +28,16 @@ To get started with the `pipelines` module, follow these steps:
 
 ## Pipeline
 
-A pipeline is a series of data processing stages connected by channels. Each stage (pipe.DataStream) is a function that performs a specific task and passes its output to the next stage. The `pipelines` module provides a flexible way to define and manage these stages.
+A pipeline is a series of data processing stages connected by channels. Each stage (`datastreams.DataStream`) is a function that performs a specific task and passes its output to the next stage. The `pipelines` module provides a flexible way to define and manage these stages.
 
 ## DataStream
 
-The `pipe.DataStream` struct is the core of the `pipelines` module. It manages the flow of data through the pipeline stages and handles errors according to the provided parameters.
+The `datastreams.DataStream` struct is the core of the `pipelines` module. It manages the flow of data through the pipeline stages and handles errors according to the provided parameters.
 
 ### Key Components
 
 - **Params**: Used to pass arguments into `DataStream` methods.
 - **ProcessFunc**: A user-defined function type used in a given `DataStream` stage via the `DataStream.Run()` method.
-
 
 ### Examples
 
@@ -46,7 +45,7 @@ Below are examples of how to use the `pipelines` module to create simple pipelin
 
 #### Squaring Numbers
 
-This example demonstrates how to set up a pipeline that takes a stream of integers, squares each integer, and outputs the results.
+This example demonstrates how to set up a pipeline that takes a stream of integers, squares each odd integer, and outputs the results.
 
 ```go
 package main
@@ -58,7 +57,7 @@ import (
 
 	"github.com/elastiflow/pipelines"
 	"github.com/elastiflow/pipelines/datastreams"
-	"github.com/elastiflow/pipelines/sources"
+	"github.com/elastiflow/pipelines/datastreams/sources"
 )
 
 func createIntArr(num int) []int {
@@ -88,11 +87,11 @@ func main() {
 	errChan := make(chan error, 10)
 	defer close(errChan)
 
-	pl := pipelines.FromSource[int, int]( // Create a new Pipeline
+	pl := pipelines.New[int, int]( // Create a new Pipeline
 		context.Background(),
 		sources.FromArray(createIntArr(10)), // Create a source to start the pipeline
 		errChan,
-	).With(exProcess)
+	).Start(exProcess)
 
 	go func(errReceiver <-chan error) { // Handle Pipeline errors
 		defer pl.Close()
