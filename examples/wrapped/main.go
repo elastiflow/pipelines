@@ -8,7 +8,7 @@ import (
 
 	"github.com/elastiflow/pipelines"
 	"github.com/elastiflow/pipelines/datastreams"
-	"github.com/elastiflow/pipelines/sources"
+	"github.com/elastiflow/pipelines/datastreams/sources"
 )
 
 func createIntArr(num int) []int {
@@ -43,11 +43,11 @@ func NewPipelineWrapper() *PipelineWrapper {
 func (pl *PipelineWrapper) Run() {
 	defer close(pl.errChan)
 
-	pl.pipeline = pipelines.FromSource[int, int]( // Create a new Pipeline
+	pl.pipeline = pipelines.New[int, int]( // Create a new Pipeline
 		context.Background(),
 		sources.FromArray(createIntArr(10)), // Create a new source
 		make(chan error, 10),
-	).With(pl.exampleProcess)
+	).Start(pl.exampleProcess)
 
 	defer pl.pipeline.Close()
 	go func(errReceiver <-chan error) { // Handle Pipeline errors

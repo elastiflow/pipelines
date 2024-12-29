@@ -6,13 +6,14 @@ import (
 
 	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFromDataStream(t *testing.T) {
 	type testCase[T any] struct {
 		name string
 		ds   datastreams.DataStream[T]
-		want *Pipe[T]
+		want *datastream[T]
 	}
 
 	in := make(chan int, 128)
@@ -21,22 +22,21 @@ func TestFromDataStream(t *testing.T) {
 		{
 			name: "given valid params, should return pipe consumer",
 			ds:   datastreams.New[int](context.Background(), in, errs),
-			want: &Pipe[int]{
-				out: make(chan int, 128),
-				ds:  datastreams.New[int](context.Background(), in, errs),
+			want: &datastream[int]{
+				out:     make(chan int, 128),
+				inputDS: datastreams.New[int](context.Background(), in, errs),
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			source := FromDataStream(tt.ds)
-			assert.Equal(t, tt.want.ds, source.ds)
-			assert.NotNil(t, source.out)
+			require.NotNil(t, source.Source(context.Background(), errs))
 		})
 	}
 }
 
-func TestPipe_Consume(t *testing.T) {
+func TestDataStreamSource_Source(t *testing.T) {
 	type testCase[T any] struct {
 		name string
 		ds   datastreams.DataStream[T]
@@ -58,9 +58,8 @@ func TestPipe_Consume(t *testing.T) {
 				in <- 2
 				close(in)
 			}()
-			go source.Consume(context.Background())
 			elements := []int{}
-			for val := range source.Out() {
+			for val := range source.Source(context.Background(), errs).Out() {
 				elements = append(elements, val)
 			}
 

@@ -1,13 +1,15 @@
 package datastreams
 
-// Processor is a user defined function type used in a given DataStream stage
-type Processor[T any] func(T) (T, error)
+// ProcessFunc is a user defined function type used in a given DataStream stage
+type ProcessFunc[T any] func(T) (T, error)
 
-// Transformer is a user defined function type used in a given DataStream stage
-type Transformer[T any, U any] func(T) (U, error)
+// TransformFunc is a user defined function type used in a given DataStream stage
+// This function type is used to transform a given input type to a given output type
+type TransformFunc[T any, U any] func(T) (U, error)
 
-// Filter is a user defined function type used in a given DataStream stage
-type Filter[T any] func(T) (bool, error)
+// FilterFunc is a user defined function type used in a given DataStream stage
+// This function type is used to filter a given input type
+type FilterFunc[T any] func(T) (bool, error)
 
 type receivers[T any] []<-chan T
 type senders[T any] []chan<- T

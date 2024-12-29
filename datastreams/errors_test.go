@@ -34,6 +34,13 @@ func TestNewError(t *testing.T) {
 			msg:     "map error",
 			want:    "datastream MAP error (code: 2 segment: segment3, message: map error)",
 		},
+		{
+			name:    "should create a SINK error",
+			code:    SINK,
+			segment: "segment4",
+			msg:     "sink error",
+			want:    "datastream SINK error (code: 3 segment: segment4, message: sink error)",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -116,6 +123,31 @@ func TestNewMapError(t *testing.T) {
 		})
 	}
 }
+
+func TestNewSinkError(t *testing.T) {
+	tests := []struct {
+		name    string
+		segment string
+		err     error
+		want    string
+	}{
+		{
+			name:    "should create a SINK error",
+			segment: "segment4",
+			err:     errors.New("sink error"),
+			want:    "datastream SINK error (code: 3 segment: segment4, message: sink error)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := newSinkError(tt.segment, tt.err)
+			if err.Error() != tt.want {
+				t.Errorf("newSinkError() = %v, want %v", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
 func TestIsRunError(t *testing.T) {
 	tests := []struct {
 		name string
@@ -189,6 +221,32 @@ func TestIsMapError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := IsMapError(tt.err); got != tt.want {
 				t.Errorf("IsMapError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsSinkError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "should return true for SINK error",
+			err:  newSinkError("segment", errors.New("error")),
+			want: true,
+		},
+		{
+			name: "should return false for non-SINK error",
+			err:  errors.New("some other error"),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSinkError(tt.err); got != tt.want {
+				t.Errorf("IsSinkError() = %v, want %v", got, tt.want)
 			}
 		})
 	}

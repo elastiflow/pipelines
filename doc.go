@@ -17,7 +17,7 @@
 //
 //		"github.com/elastiflow/pipelines"
 //		"github.com/elastiflow/pipelines/datastreams"
-//		"github.com/elastiflow/pipelines/sources"
+//		"github.com/elastiflow/pipelines/datastreams/sources"
 //	)
 //
 //	// PipelineWrapper is an example of a pipelines.Pipeline wrapper implementation. It includes shared state via counters.
@@ -43,14 +43,14 @@
 //	func (pl *PipelineWrapper) Run() {
 //		defer close(pl.errChan)
 //
-//		pipeline_ := pipelines.FromSource[int, int]( // Create a new Pipeline
+//		pipeline := pipelines.New[int, int]( // Create a new Pipeline
 //			context.Background(),
 //			sources.FromArray(createIntArr(10)), // Create a source to start the pipeline
 //			pl.errChan,
-//		).With(pl.exampleProcess)
+//		).Start(pl.exampleProcess)
 //
 //		go func(errReceiver <-chan error) { // Handle Pipeline errors
-//			defer pipeline_.Close()
+//			defer pipeline.Close()
 //			for err := range errReceiver {
 //				if err != nil {
 //					slog.Error("demo error: " + err.Error())
@@ -59,7 +59,7 @@
 //			}
 //		}(pl.errChan)
 //
-//		for out := range pipeline_.Out() { // Read Pipeline output
+//		for out := range pipeline.Out() { // Read Pipeline output
 //			slog.Info("received simple pipeline output", slog.Int("out", out))
 //		}
 //	}

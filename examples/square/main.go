@@ -7,7 +7,7 @@ import (
 
 	"github.com/elastiflow/pipelines"
 	"github.com/elastiflow/pipelines/datastreams"
-	"github.com/elastiflow/pipelines/sources"
+	"github.com/elastiflow/pipelines/datastreams/sources"
 )
 
 func createIntArr(num int) []int {
@@ -30,6 +30,7 @@ func exProcess(p datastreams.DataStream[int]) datastreams.DataStream[int] {
 		datastreams.Params{Num: 2},
 	).Run(
 		squareOdds,
+		datastreams.Params{SkipError: true},
 	)
 }
 
@@ -37,11 +38,11 @@ func main() {
 	errChan := make(chan error, 10)
 	defer close(errChan)
 
-	pl := pipelines.FromSource[int, int]( // Create a new Pipeline
+	pl := pipelines.New[int, int]( // Create a new Pipeline
 		context.Background(),
 		sources.FromArray(createIntArr(10)),
 		errChan,
-	).With(exProcess)
+	).Start(exProcess)
 
 	go func(errReceiver <-chan error) { // Handle Pipeline errors
 		defer pl.Close()
@@ -57,14 +58,9 @@ func main() {
 	}
 
 	// Output:
-	// {"out":0}
 	// {"out":1}
-	// {"out":4}
 	// {"out":9}
-	// {"out":16}
 	// {"out":25}
-	// {"out":36}
 	// {"out":49}
-	// {"out":64}
 	// {"out":81}
 }
