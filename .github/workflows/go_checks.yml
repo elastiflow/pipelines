@@ -14,3 +14,8 @@ jobs:
   go_checks:
     name: Go checks
     uses: elastiflow/gha-reusable-workflows/.github/workflows/reusable_go_checks.yml@v0
+    with:
+      sonarcloud_run: true
+      sonarcloud_project_key: "elastiflow_pipelines"
+    secrets:
+      sonarcloud_token: ${{ secrets.SONAR_TOKEN }}
