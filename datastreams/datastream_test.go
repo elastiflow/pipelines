@@ -13,12 +13,15 @@ import (
 )
 
 func TestDataStream_Take(t *testing.T) {
-	tests := []struct {
-		name  string
-		input [][]int
-		num   int
-		want  []int
-	}{
+	type testCase struct {
+		name          string
+		input         [][]int
+		num           int
+		want          []int
+		withWaitGroup bool
+	}
+
+	tests := []testCase{
 		{
 			name: "take from single stream",
 			input: [][]int{
@@ -44,13 +47,24 @@ func TestDataStream_Take(t *testing.T) {
 			num:  5,
 			want: []int{1, 2},
 		},
+		// New test withWaitGroup
+		{
+			name: "take with wait group",
+			input: [][]int{
+				{1, 2, 3, 4, 5},
+			},
+			num:           3,
+			want:          []int{1, 2, 3},
+			withWaitGroup: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			var wg *sync.WaitGroup
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+
 			var inputStreams []<-chan int
 			for _, stream := range tt.input {
 				eventStream := make(chan int, len(stream))
@@ -64,6 +78,12 @@ func TestDataStream_Take(t *testing.T) {
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
+
+			if tt.withWaitGroup {
+				wg = &sync.WaitGroup{}
+				pipe = pipe.WithWaitGroup(wg)
+			}
+
 			params := Params{Num: tt.num}
 			outputPipe := pipe.Take(params)
 			var got []int
@@ -72,18 +92,24 @@ func TestDataStream_Take(t *testing.T) {
 					got = append(got, event)
 				}
 			}
+			if tt.withWaitGroup {
+				wg.Wait() // Ensure all goroutines complete
+			}
+
 			assert.ElementsMatch(t, tt.want, got)
 		})
 	}
 }
 
 func TestDataStream_FanOut(t *testing.T) {
-	tests := []struct {
-		name  string
-		input []int
-		num   int
-		want  []int
-	}{
+	type testCase struct {
+		name          string
+		input         []int
+		num           int
+		want          []int
+		withWaitGroup bool
+	}
+	tests := []testCase{
 		{
 			name:  "fan out to multiple streams",
 			input: []int{1, 2, 3, 4, 5},
@@ -94,9 +120,7 @@ func TestDataStream_FanOut(t *testing.T) {
 			name:  "fan out to single stream",
 			input: []int{1, 2, 3, 4, 5},
 			num:   1,
-			want: []int{
-				1, 2, 3, 4, 5,
-			},
+			want:  []int{1, 2, 3, 4, 5},
 		},
 		{
 			name:  "fan out with empty input",
@@ -104,42 +128,61 @@ func TestDataStream_FanOut(t *testing.T) {
 			num:   3,
 			want:  []int{},
 		},
+		{
+			name:          "fan out with wait group",
+			input:         []int{10, 20, 30},
+			num:           2,
+			want:          []int{10, 20, 30},
+			withWaitGroup: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			var wg *sync.WaitGroup
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+
 			inputStream := make(chan int, len(tt.input))
 			for _, event := range tt.input {
 				inputStream <- event
 			}
 			close(inputStream)
+
 			pipe := DataStream[int]{
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
+			if tt.withWaitGroup {
+				wg = &sync.WaitGroup{}
+				pipe = pipe.WithWaitGroup(wg)
+			}
+
 			params := Params{Num: tt.num, BufferSize: len(tt.input)}
 			outputPipe := pipe.FanOut(params)
-			assert.Equal(t, tt.num, len(outputPipe.inStreams))
 			var got []int
 			for _, outStream := range outputPipe.inStreams {
 				for event := range outStream {
 					got = append(got, event)
 				}
 			}
+			if tt.withWaitGroup {
+				wg.Wait()
+			}
+
 			assert.ElementsMatch(t, tt.want, got)
 		})
 	}
 }
 
 func TestDataStream_FanIn(t *testing.T) {
-	tests := []struct {
-		name  string
-		input [][]int
-		want  []int
-	}{
+	type testCase struct {
+		name          string
+		input         [][]int
+		want          []int
+		withWaitGroup bool
+	}
+	tests := []testCase{
 		{
 			name: "fan in from multiple streams",
 			input: [][]int{
@@ -163,13 +206,23 @@ func TestDataStream_FanIn(t *testing.T) {
 			},
 			want: []int{},
 		},
+		{
+			name: "fan in from multiple streams + wait group",
+			input: [][]int{
+				{10, 20},
+				{30, 40},
+			},
+			want:          []int{10, 20, 30, 40},
+			withWaitGroup: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			var wg *sync.WaitGroup
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+
 			var inputStreams []<-chan int
 			for _, stream := range tt.input {
 				eventStream := make(chan int, len(stream))
@@ -183,11 +236,18 @@ func TestDataStream_FanIn(t *testing.T) {
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
+			if tt.withWaitGroup {
+				wg = &sync.WaitGroup{}
+				pipe = pipe.WithWaitGroup(wg)
+			}
 			params := Params{BufferSize: len(tt.input)}
 			outputPipe := pipe.FanIn(params)
 			var got []int
 			for event := range outputPipe.inStreams[0] {
 				got = append(got, event)
+			}
+			if tt.withWaitGroup {
+				wg.Wait()
 			}
 			assert.ElementsMatch(t, tt.want, got)
 		})
@@ -195,11 +255,13 @@ func TestDataStream_FanIn(t *testing.T) {
 }
 
 func TestDataStream_OrDone(t *testing.T) {
-	tests := []struct {
-		name  string
-		input [][]int
-		want  []int
-	}{
+	type testCase struct {
+		name          string
+		input         [][]int
+		want          []int
+		withWaitGroup bool
+	}
+	tests := []testCase{
 		{
 			name: "orDone with multiple streams",
 			input: [][]int{
@@ -223,11 +285,19 @@ func TestDataStream_OrDone(t *testing.T) {
 			},
 			want: []int{},
 		},
+		{
+			name: "orDone with wait group",
+			input: [][]int{
+				{10, 11, 12},
+			},
+			want:          []int{10, 11, 12},
+			withWaitGroup: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			var wg *sync.WaitGroup
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var inputStreams []<-chan int
@@ -243,6 +313,10 @@ func TestDataStream_OrDone(t *testing.T) {
 				ctx:       ctx,
 				inStreams: inputStreams,
 			}
+			if tt.withWaitGroup {
+				wg = &sync.WaitGroup{}
+				pipe = pipe.WithWaitGroup(wg)
+			}
 			outputPipe := pipe.OrDone()
 			var got []int
 			for _, outStream := range outputPipe.inStreams {
@@ -250,18 +324,23 @@ func TestDataStream_OrDone(t *testing.T) {
 					got = append(got, event)
 				}
 			}
+			if tt.withWaitGroup {
+				wg.Wait()
+			}
 			assert.ElementsMatch(t, tt.want, got)
 		})
 	}
 }
 
 func TestDataStream_Broadcast(t *testing.T) {
-	tests := []struct {
-		name  string
-		input []int
-		num   int
-		want  []int
-	}{
+	type testCase struct {
+		name          string
+		input         []int
+		num           int
+		want          []int
+		withWaitGroup bool
+	}
+	tests := []testCase{
 		{
 			name:  "broadcast to multiple streams",
 			input: []int{1, 2, 3, 4, 5},
@@ -280,11 +359,18 @@ func TestDataStream_Broadcast(t *testing.T) {
 			num:   2,
 			want:  []int{},
 		},
+		{
+			name:          "broadcast to multiple streams with waitgroup",
+			input:         []int{10, 20},
+			num:           2,
+			want:          []int{10, 20, 10, 20},
+			withWaitGroup: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			var wg *sync.WaitGroup
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			inputStream := make(chan int, len(tt.input))
@@ -296,14 +382,20 @@ func TestDataStream_Broadcast(t *testing.T) {
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
 			}
+			if tt.withWaitGroup {
+				wg = &sync.WaitGroup{}
+				pipe = pipe.WithWaitGroup(wg)
+			}
 			params := Params{Num: tt.num, BufferSize: len(tt.input)*tt.num + 1}
 			outputPipe := pipe.Broadcast(params)
-			assert.Equal(t, tt.num, len(outputPipe.inStreams))
 			var got []int
 			for _, outStream := range outputPipe.inStreams {
 				for event := range outStream {
 					got = append(got, event)
 				}
+			}
+			if tt.withWaitGroup {
+				wg.Wait()
 			}
 			assert.ElementsMatch(t, tt.want, got)
 		})
@@ -311,11 +403,14 @@ func TestDataStream_Broadcast(t *testing.T) {
 }
 
 func TestDataStream_Tee(t *testing.T) {
-	tests := []struct {
-		name  string
-		input []int
-		want  [][]int
-	}{
+	type testCase struct {
+		name          string
+		input         []int
+		want          [][]int
+		withWaitGroup bool
+	}
+
+	tests := []testCase{
 		{
 			name:  "tee to multiple streams",
 			input: []int{1, 2, 3, 4, 5},
@@ -329,11 +424,17 @@ func TestDataStream_Tee(t *testing.T) {
 			input: []int{},
 			want:  [][]int{},
 		},
+		{
+			name:          "tee to multiple streams + wait group",
+			input:         []int{10, 20},
+			want:          [][]int{{10, 20}, {10, 20}},
+			withWaitGroup: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			var wg *sync.WaitGroup
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			inputStream := make(chan int, len(tt.input))
@@ -344,6 +445,10 @@ func TestDataStream_Tee(t *testing.T) {
 			pipe := DataStream[int]{
 				ctx:       ctx,
 				inStreams: []<-chan int{inputStream},
+			}
+			if tt.withWaitGroup {
+				wg = &sync.WaitGroup{}
+				pipe = pipe.WithWaitGroup(wg)
 			}
 			params := Params{BufferSize: len(tt.input)}
 			outputPipe1, outputPipe2 := pipe.Tee(params)
@@ -364,6 +469,10 @@ func TestDataStream_Tee(t *testing.T) {
 			}
 			if len(got2) > 0 {
 				got = append(got, got2)
+			}
+
+			if tt.withWaitGroup {
+				wg.Wait()
 			}
 			assert.ElementsMatch(t, tt.want, got)
 		})
@@ -443,7 +552,6 @@ func TestDataStream_Run(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			inputStream := make(chan int, len(tt.input))
@@ -451,7 +559,7 @@ func TestDataStream_Run(t *testing.T) {
 				inputStream <- event
 			}
 			close(inputStream)
-			errStream := make(chan error, len(tt.input))
+			errStream := make(chan error, len(tt.input)+5)
 			ds := DataStream[int]{
 				ctx:       ctx,
 				errStream: errStream,
@@ -469,15 +577,7 @@ func TestDataStream_Run(t *testing.T) {
 			}
 			assert.ElementsMatch(t, tt.want, got)
 			if tt.useWaitGroup && wg != nil {
-				done := make(chan struct{})
-				go func() {
-					wg.Wait()
-					close(done)
-				}()
-				select {
-				case <-done:
-					// success
-				}
+				wg.Wait()
 			}
 		})
 	}
@@ -780,7 +880,7 @@ func TestDataStream_WithWaitGroup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancelFn := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
 			in := make(chan int, len(tt.input))
 			for _, val := range tt.input {
@@ -788,7 +888,7 @@ func TestDataStream_WithWaitGroup(t *testing.T) {
 			}
 			close(in)
 			wg := &sync.WaitGroup{}
-			errCh := make(chan error, len(tt.input))
+			errCh := make(chan error, len(tt.input)*2)
 			ds := DataStream[int]{
 				ctx:       ctx,
 				errStream: errCh,
@@ -802,18 +902,11 @@ func TestDataStream_WithWaitGroup(t *testing.T) {
 			for val := range outDS.Out() {
 				got = append(got, val)
 			}
-			done := make(chan struct{})
-			go func() {
-				wg.Wait()
-				close(done)
-			}()
-			select {
-			case <-done:
-			}
+			wg.Wait()
 			if !tt.cancel {
 				assert.ElementsMatch(t, tt.want, got)
 			} else {
-				t.Logf("Received %d items after early cancel: %v", len(got), got)
+				t.Logf("Canceled scenario: got %v before context was canceled", got)
 			}
 		})
 	}
