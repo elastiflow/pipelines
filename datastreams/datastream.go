@@ -11,6 +11,7 @@ type DataStream[T any] struct {
 	ctx       context.Context
 	errStream chan<- error
 	inStreams []<-chan T
+	wg        *sync.WaitGroup
 }
 
 // New constructs a new DataStream of a given type by passing in a context, an input
@@ -25,6 +26,20 @@ func New[T any](
 		ctx:       ctx,
 		errStream: errStream,
 		inStreams: []<-chan T{inStream},
+		wg:        nil,
+	}
+}
+
+// WithWaitGroup attaches a WaitGroup to this DataStream, returning a copy.
+func (p DataStream[T]) WithWaitGroup(wg *sync.WaitGroup) DataStream[T] {
+	p.wg = wg
+	return p
+}
+
+// incrementWaitGroup checks to see if a wait group is attached to the DataStream and increments it by delta.
+func (p DataStream[T]) incrementWaitGroup(delta int) {
+	if p.wg != nil {
+		p.wg.Add(delta)
 	}
 }
 
@@ -44,7 +59,11 @@ func (p DataStream[T]) Sink(
 	params ...Params,
 ) DataStream[T] {
 	param := applyParams(params...)
+	p.incrementWaitGroup(1)
 	go func(ctx context.Context, sink Sinker[T], ds DataStream[T], parameters Params) {
+		if p.wg != nil {
+			defer p.wg.Done()
+		}
 		if err := sink.Sink(ctx, ds); err != nil {
 			p.errStream <- newSinkError(parameters.SegmentName, err)
 		}
@@ -62,7 +81,11 @@ func (p DataStream[T]) Run(
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
+		p.incrementWaitGroup(1)
 		go func(inStream <-chan T, outStream chan<- T, process ProcessFunc[T]) {
+			if p.wg != nil {
+				defer p.wg.Done()
+			}
 			defer close(outStream)
 			for {
 				select {
@@ -98,7 +121,11 @@ func (p DataStream[T]) Filter(filter FilterFunc[T], params ...Params) DataStream
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
+		p.incrementWaitGroup(1)
 		go func(inStream <-chan T, outStream chan<- T) {
+			if p.wg != nil {
+				defer p.wg.Done()
+			}
 			defer close(outStream)
 			for val := range inStream {
 				pass, err := filter(val)
@@ -128,7 +155,11 @@ func (p DataStream[T]) Take(
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
+		p.incrementWaitGroup(1)
 		go func(inStream <-chan T, outStream chan<- T) {
+			if p.wg != nil {
+				defer p.wg.Done()
+			}
 			defer close(outStream)
 			for j := 0; j < param.Num; j++ {
 				select {
@@ -152,7 +183,11 @@ func (p DataStream[T]) FanOut(
 ) DataStream[T] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(fanOut, param)
+	p.incrementWaitGroup(1)
 	go func(inStream <-chan T, outStreams senders[T]) {
+		if p.wg != nil {
+			defer p.wg.Done()
+		}
 		defer outChannels.Close()
 		var counter int
 		for val := range inStream {
@@ -191,8 +226,12 @@ func (p DataStream[T]) FanIn(
 		go multiplex(c)
 	}
 	// Wait for all the reads to complete
+	p.incrementWaitGroup(1)
 	go func() {
 		wg.Wait()
+		if p.wg != nil {
+			defer p.wg.Done()
+		}
 		outChannels.Close()
 	}()
 	return nextPipe
@@ -206,7 +245,11 @@ func (p DataStream[T]) OrDone(
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
+		p.incrementWaitGroup(1)
 		go func(inStream <-chan T, outStream chan<- T) {
+			if p.wg != nil {
+				defer p.wg.Done()
+			}
 			defer close(outStream)
 			for {
 				select {
@@ -235,7 +278,11 @@ func (p DataStream[T]) Broadcast(
 ) DataStream[T] {
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(broadcast, param)
+	p.incrementWaitGroup(1)
 	go func(inStream <-chan T, outStreams senders[T]) {
+		if p.wg != nil {
+			defer p.wg.Done()
+		}
 		defer outChannels.Close()
 		for val := range inStream {
 			for i := 0; i < len(outStreams); i++ {
@@ -260,7 +307,11 @@ func (p DataStream[T]) Tee(
 	nextPipe1, outChannels1 := p.nextT(standard, param)
 	nextPipe2, outChannels2 := p.nextT(standard, param)
 	for i := 0; i < len(p.inStreams); i++ {
+		p.incrementWaitGroup(1)
 		go func(in <-chan T, o1 chan<- T, o2 chan<- T) {
+			if p.wg != nil {
+				defer p.wg.Done()
+			}
 			defer close(o1)
 			defer close(o2)
 			for val := range orDone(p.ctx, in) {
@@ -287,9 +338,13 @@ func Map[T any, U any](
 	params ...Params,
 ) DataStream[U] {
 	param := applyParams(params...)
-	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream)
+	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
 	for i := 0; i < len(ds.inStreams); i++ {
+		ds.incrementWaitGroup(1)
 		go func(inStream <-chan T, outStream chan<- U, transformer TransformFunc[T, U]) {
+			if ds.wg != nil {
+				defer ds.wg.Done()
+			}
 			defer close(outStream)
 			for {
 				select {
@@ -324,6 +379,7 @@ func next[T any](
 	chanCount int,
 	ctx context.Context,
 	errStream chan<- error,
+	wg *sync.WaitGroup,
 ) (DataStream[T], pipes[T]) {
 	switch pipeType {
 	case fanOut, broadcast:
@@ -338,12 +394,13 @@ func next[T any](
 			ctx:       ctx,
 			errStream: errStream,
 			inStreams: streams.Receivers(),
+			wg:        wg,
 		},
 		streams
 }
 
 func (p DataStream[T]) nextT(pipeType pipeType, params Params) (DataStream[T], pipes[T]) {
-	return next[T](pipeType, params, len(p.inStreams), p.ctx, p.errStream)
+	return next[T](pipeType, params, len(p.inStreams), p.ctx, p.errStream, p.wg)
 }
 
 // orDone helps forward values until context is canceled or the stream ends.

@@ -372,11 +372,12 @@ func TestDataStream_Tee(t *testing.T) {
 
 func TestDataStream_Run(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   []int
-		process ProcessFunc[int]
-		params  Params
-		want    []int
+		name         string
+		input        []int
+		process      ProcessFunc[int]
+		params       Params
+		want         []int
+		useWaitGroup bool
 	}{
 		{
 			name:  "run with simple process",
@@ -429,6 +430,15 @@ func TestDataStream_Run(t *testing.T) {
 			params: Params{},
 			want:   []int{},
 		},
+		{
+			name:  "run with waitgroup",
+			input: []int{10, 20},
+			process: func(v int) (int, error) {
+				return v + 1, nil
+			},
+			want:         []int{11, 21},
+			useWaitGroup: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -442,17 +452,33 @@ func TestDataStream_Run(t *testing.T) {
 			}
 			close(inputStream)
 			errStream := make(chan error, len(tt.input))
-			pipe := DataStream[int]{
+			ds := DataStream[int]{
 				ctx:       ctx,
 				errStream: errStream,
 				inStreams: []<-chan int{inputStream},
 			}
-			outputPipe := pipe.Run(tt.process, tt.params)
+			var wg *sync.WaitGroup
+			if tt.useWaitGroup {
+				wg = &sync.WaitGroup{}
+				ds = ds.WithWaitGroup(wg)
+			}
+			outputPipe := ds.Run(tt.process, tt.params)
 			var got []int
 			for event := range outputPipe.inStreams[0] {
 				got = append(got, event)
 			}
 			assert.ElementsMatch(t, tt.want, got)
+			if tt.useWaitGroup && wg != nil {
+				done := make(chan struct{})
+				go func() {
+					wg.Wait()
+					close(done)
+				}()
+				select {
+				case <-done:
+					// success
+				}
+			}
 		})
 	}
 }
@@ -720,6 +746,74 @@ func TestDataStream_Sink(t *testing.T) {
 			require.Len(t, gotErrors, tt.expectedErrors, "number of errors mismatch")
 			if tt.expectedErrors > 0 {
 				assert.Contains(t, gotErrors[0].Error(), "sink error triggered on value")
+			}
+		})
+	}
+}
+
+func TestDataStream_WithWaitGroup(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []int
+		process ProcessFunc[int]
+		cancel  bool
+		want    []int
+	}{
+		{
+			name:  "no cancel, simple doubling",
+			input: []int{1, 2, 3},
+			process: func(v int) (int, error) {
+				return v * 2, nil
+			},
+			want: []int{2, 4, 6},
+		},
+		{
+			name:  "context canceled before reading all",
+			input: []int{10, 20, 30},
+			process: func(v int) (int, error) {
+				return v, nil
+			},
+			cancel: true,
+			want:   nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancelFn := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancelFn()
+			in := make(chan int, len(tt.input))
+			for _, val := range tt.input {
+				in <- val
+			}
+			close(in)
+			wg := &sync.WaitGroup{}
+			errCh := make(chan error, len(tt.input))
+			ds := DataStream[int]{
+				ctx:       ctx,
+				errStream: errCh,
+				inStreams: []<-chan int{in},
+			}.WithWaitGroup(wg)
+			outDS := ds.Run(tt.process)
+			if tt.cancel {
+				cancelFn()
+			}
+			var got []int
+			for val := range outDS.Out() {
+				got = append(got, val)
+			}
+			done := make(chan struct{})
+			go func() {
+				wg.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			}
+			if !tt.cancel {
+				assert.ElementsMatch(t, tt.want, got)
+			} else {
+				t.Logf("Received %d items after early cancel: %v", len(got), got)
 			}
 		})
 	}

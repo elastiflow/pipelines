@@ -20,6 +20,7 @@ package pipelines
 
 import (
 	"context"
+	"sync"
 
 	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/elastiflow/pipelines/datastreams/sources"
@@ -53,6 +54,7 @@ type Pipeline[T any, U any] struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 	errorChan  chan error
+	wg         *sync.WaitGroup
 }
 
 // New constructs a new Pipeline of a given type by passing in a datastreams.Sourcer.
@@ -75,6 +77,7 @@ func New[T any, U any](
 		ctx:        ctx,
 		sourceDS:   sourcer.Source(ctx, errStream),
 		errorChan:  errStream,
+		wg:         &sync.WaitGroup{},
 	}
 }
 
@@ -115,7 +118,7 @@ func (p *Pipeline[T, U]) Map(
 //
 //	pipeline.Stream(func(ds DataStream[int]) DataStream[int] { ... })
 func (p *Pipeline[T, U]) Stream(streamFunc StreamFunc[T, U]) datastreams.DataStream[U] {
-	p.sinkDS = streamFunc(p.sourceDS)
+	p.sinkDS = streamFunc(p.sourceDS.WithWaitGroup(p.wg))
 	return p.sinkDS
 }
 
@@ -127,7 +130,7 @@ func (p *Pipeline[T, U]) Stream(streamFunc StreamFunc[T, U]) datastreams.DataStr
 //
 //	pipeline.Start(func(ds DataStream[int]) DataStream[int] { ... }).Start(...)
 func (p *Pipeline[T, U]) Start(streamFunc StreamFunc[T, U]) *Pipeline[T, U] {
-	p.sinkDS = streamFunc(p.sourceDS)
+	p.sinkDS = streamFunc(p.sourceDS.WithWaitGroup(p.wg))
 	return p
 }
 
@@ -163,8 +166,18 @@ func (p *Pipeline[T, U]) Out() <-chan U {
 //
 //   - processor: a ProcessFunc[T] that may transform T in place
 //   - params: optional datastreams.Params
-func (p *Pipeline[T, U]) Process(processor datastreams.ProcessFunc[T], params ...datastreams.Params) *Pipeline[T, U] {
-	return New[T, U](p.ctx, sources.FromDataStream(p.sourceDS.Run(processor, params...)), p.errorChan)
+func (p *Pipeline[T, U]) Process(
+	processor datastreams.ProcessFunc[T],
+	params ...datastreams.Params,
+) *Pipeline[T, U] {
+	newSource := p.sourceDS.WithWaitGroup(p.wg).Run(processor, params...)
+	return &Pipeline[T, U]{
+		sourceDS:   newSource,
+		ctx:        p.ctx,
+		cancelFunc: p.cancelFunc,
+		errorChan:  p.errorChan,
+		wg:         p.wg,
+	}
 }
 
 // Tee creates a fork in the pipeline's sink DataStream, returning two DataStreams
@@ -175,7 +188,8 @@ func (p *Pipeline[T, U]) Process(processor datastreams.ProcessFunc[T], params ..
 //   - params: optional datastreams.Params for buffer sizing, etc.
 //   - returns two DataStreams of type U, each receiving the same data from the pipeline sink.
 func (p *Pipeline[T, U]) Tee(params ...datastreams.Params) (datastreams.DataStream[U], datastreams.DataStream[U]) {
-	return p.sinkDS.Tee(params...)
+	// We attach the WaitGroup so the Tee goroutine gets tracked.
+	return p.sinkDS.WithWaitGroup(p.wg).Tee(params...)
 }
 
 // ToSource converts the pipeline's sink into a datastreams.Sourcer[U], allowing it to be used
@@ -190,13 +204,6 @@ func (p *Pipeline[T, U]) ToSource() datastreams.Sourcer[U] {
 // This method helps ensure you process all items before shutting down. Once Wait
 // returns, the Pipeline is effectively drained.
 func (p *Pipeline[T, U]) Wait() {
-	defer close(p.errorChan)
-	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		case <-p.sourceDS.OrDone().Out():
-			// Keep draining until context is done or input closes.
-		}
-	}
+	p.wg.Wait() // Blocks until all goroutines managed by p.wg have returned
+	close(p.errorChan)
 }

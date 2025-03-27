@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -509,9 +510,12 @@ func ExamplePipeline_Map() {
 func ExamplePipeline_Sink() {
 	errChan := make(chan error)
 	outChan := make(chan string)
+	var wg sync.WaitGroup
+	wg.Add(5)
 	go func() {
 		for out := range outChan { // Read Pipeline output
-			fmt.Println("published:", out)
+			fmt.Println("out:", out)
+			wg.Done()
 		}
 	}()
 
@@ -531,13 +535,14 @@ func ExamplePipeline_Sink() {
 	); err != nil {
 		fmt.Println("error sinking:", err)
 	}
+	wg.Wait()
 
 	// Output:
-	// published: Im a string now: 1
-	// published: Im a string now: 2
-	// published: Im a string now: 3
-	// published: Im a string now: 4
-	// published: Im a string now: 5
+	// out: Im a string now: 1
+	// out: Im a string now: 2
+	// out: Im a string now: 3
+	// out: Im a string now: 4
+	// out: Im a string now: 5
 }
 
 // ExamplePipeline_ToSource demonstrates how to turn a Pipeline into a source
@@ -594,6 +599,102 @@ func TestIntegrationPipeline_Close(t *testing.T) {
 		_ = ok // doesn't matter, but we want to see if channel closed
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Pipeline output did not close after pipeline.Close() call")
+	}
+}
+
+func TestIntegrationPipeline_Wait(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           []int
+		cancelContext   bool
+		wantOutput      []int
+		expectWaitToEnd bool
+	}{
+		{
+			name:            "normal completion",
+			input:           []int{1, 2, 3, 4, 5},
+			cancelContext:   false,
+			wantOutput:      []int{2, 4, 6, 8, 10},
+			expectWaitToEnd: true,
+		},
+		{
+			name:            "context canceled before consuming all input",
+			input:           []int{1, 2, 3, 4, 5},
+			cancelContext:   true,
+			wantOutput:      []int{}, // We won't reliably get output because context is canceled
+			expectWaitToEnd: true,
+		},
+		{
+			name:            "no input (empty source)",
+			input:           []int{},
+			cancelContext:   false,
+			wantOutput:      []int{},
+			expectWaitToEnd: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancelFn := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancelFn()
+
+			errChan := make(chan error, len(tt.input)*2)
+
+			// Create the pipeline. It processes each input by multiplying by 2.
+			pipeline := New[int, int](ctx, NewMockSource(tt.input), errChan).
+				Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+					return ds.Run(func(v int) (int, error) {
+						return v * 2, nil
+					})
+				})
+
+			// Optionally cancel the context to simulate an abrupt stop.
+			if tt.cancelContext {
+				cancelFn()
+			}
+
+			// We'll collect the final outputs from pipeline.Out()
+			var gotOutput []int
+			doneReading := make(chan struct{})
+
+			go func() {
+				defer close(doneReading)
+				for val := range pipeline.Out() {
+					gotOutput = append(gotOutput, val)
+				}
+			}()
+
+			// Now we call Wait() in the main goroutine to block until
+			// all pipeline goroutines are finished.
+			waitDone := make(chan struct{})
+			go func() {
+				pipeline.Wait()
+				close(waitDone)
+			}()
+
+			// Check if Wait returns by the deadline
+			select {
+			case <-waitDone:
+				if !tt.expectWaitToEnd {
+					t.Fatal("Wait ended unexpectedly; test expected it to block")
+				}
+			case <-time.After(10 * time.Second):
+				if tt.expectWaitToEnd {
+					t.Fatal("Wait did not return in time")
+				}
+			}
+
+			<-doneReading // ensure we finish reading pipeline outputs
+
+			// Verify final pipeline output matches expectation if not canceled
+			if !tt.cancelContext {
+				assert.ElementsMatch(t, tt.wantOutput, gotOutput)
+			}
+
+			// Verify the pipeline's error channel has been closed
+			_, open := <-errChan
+			assert.False(t, open, "errorChan should be closed after Wait returns")
+		})
 	}
 }
 
