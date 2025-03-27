@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDataStream_Take(t *testing.T) {
@@ -629,4 +631,103 @@ func TestDataStream_Map(t *testing.T) {
 			assert.ElementsMatch(t, tt.expectedElements, results)
 		})
 	}
+}
+
+func TestDataStream_Sink(t *testing.T) {
+	type testCase struct {
+		name              string
+		input             []int
+		sinkErrorValue    int
+		expectedCollected []int
+		expectedErrors    int
+	}
+
+	tests := []testCase{
+		{
+			name:              "error on 3",
+			input:             []int{1, 2, 3, 4, 5},
+			sinkErrorValue:    3,
+			expectedCollected: []int{1, 2},
+			expectedErrors:    1,
+		},
+		{
+			name:              "no errors returned",
+			input:             []int{10, 20, 30},
+			sinkErrorValue:    -1,
+			expectedCollected: []int{10, 20, 30},
+			expectedErrors:    0,
+		},
+		{
+			name:              "error on first item",
+			input:             []int{99, 100},
+			sinkErrorValue:    99,
+			expectedCollected: []int{},
+			expectedErrors:    1,
+		},
+		{
+			name:              "empty input",
+			input:             []int{},
+			sinkErrorValue:    -1,
+			expectedCollected: []int{},
+			expectedErrors:    0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			in := make(chan int, len(tt.input))
+			for _, val := range tt.input {
+				in <- val
+			}
+			close(in)
+			errChan := make(chan error, len(tt.input)+2)
+			ds := New[int](ctx, in, errChan)
+			collected := []int{}
+			var wg sync.WaitGroup
+			wg.Add(1)
+			sink := MockSinkerFunc[int](func(ctx context.Context, ds DataStream[int]) error {
+				defer wg.Done()
+				for val := range ds.Out() {
+					if val == tt.sinkErrorValue && tt.sinkErrorValue != -1 {
+						return errors.New("sink error triggered on value")
+					}
+					collected = append(collected, val)
+				}
+				return nil
+			})
+			ds.Sink(sink)
+			wg.Wait()
+			gotErrors := make([]error, 0, tt.expectedErrors)
+			for i := 0; i < tt.expectedErrors; i++ {
+				select {
+				case e := <-errChan:
+					gotErrors = append(gotErrors, e)
+				case <-time.After(200 * time.Millisecond):
+					require.Fail(t, "expected error but none arrived")
+				}
+			}
+			if tt.expectedErrors == 0 {
+				select {
+				case e := <-errChan:
+					require.Failf(t, "unexpected error", "got: %v", e)
+				default:
+					// no errors == good
+				}
+			}
+			assert.Equal(t, tt.expectedCollected, collected, "collected items mismatch")
+			require.Len(t, gotErrors, tt.expectedErrors, "number of errors mismatch")
+			if tt.expectedErrors > 0 {
+				assert.Contains(t, gotErrors[0].Error(), "sink error triggered on value")
+			}
+		})
+	}
+}
+
+// MockSinkerFunc is a helper type that implements the Sinker[T] interface via a function.
+type MockSinkerFunc[T any] func(ctx context.Context, ds DataStream[T]) error
+
+func (f MockSinkerFunc[T]) Sink(ctx context.Context, ds DataStream[T]) error {
+	return f(ctx, ds)
 }

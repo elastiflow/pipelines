@@ -2,9 +2,7 @@ package datastreams
 
 import (
 	"context"
-	"math/rand" // nosemgrep
 	"sync"
-	"time"
 )
 
 // DataStream is a struct that defines a generic stream process stage.
@@ -36,7 +34,7 @@ func (p DataStream[T]) Out() <-chan T {
 	if len(p.inStreams) == 1 {
 		return p.inStreams[0]
 	}
-	return p.FanIn().inStreams[0]
+	return p.FanIn().inStreams[0] // If multiple streams, FanIn to a single stream
 }
 
 // Sink outputs DataStream values to a defined Sinker in a separate goroutine.
@@ -156,10 +154,11 @@ func (p DataStream[T]) FanOut(
 	nextPipe, outChannels := p.nextT(fanOut, param)
 	go func(inStream <-chan T, outStreams senders[T]) {
 		defer outChannels.Close()
-		r := rand.New(rand.NewSource(time.Now().UnixNano())) // #nosec G404
+		var counter int
 		for val := range inStream {
 			select {
-			case outStreams[r.Intn(len(outStreams))] <- val:
+			case outStreams[counter%len(outStreams)] <- val:
+				counter++
 			case <-p.ctx.Done():
 				return
 			}
