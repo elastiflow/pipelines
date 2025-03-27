@@ -12,17 +12,18 @@ test-verbose: test
 
 .PHONY: report-coverage
 report-coverage:
+	make test
 	@go tool cover -func=${GO_TEST_COVERAGE_PROFILE} | grep total
 
 .PHONY: coverage-func
 coverage-func:
-	make coverage
+	make test
 	go tool cover -func=coverage.out
 
 .PHONY: coverage-html
 coverage-html:
-	make coverage
-	go tool cover -html=coverage.out
+	make test
+	go tool cover  -html=coverage.out
 
 .PHONY: scan\:sbom
 scan\:sbom:

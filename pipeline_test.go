@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+// TestIntegrationPipeline_Map tests using Pipeline.Map with optional pre/post processing.
 func TestIntegrationPipeline_Map(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -69,15 +71,20 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 				errChan,
 			)
 
+			// Apply any pre-processing steps
 			for _, p := range tt.preprocess {
 				pipeline = pipeline.Process(p)
 			}
 
+			// Map transform
 			transformed := pipeline.Map(tt.mapFunc)
+
+			// Post-processing on the DataStream
 			for _, p := range tt.postprocess {
 				transformed = transformed.Run(p)
 			}
 
+			// Gather the results
 			var gotStrings []string
 			for v := range transformed.Out() {
 				gotStrings = append(gotStrings, v)
@@ -88,6 +95,7 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 	}
 }
 
+// TestIntegrationPipeline_Out demonstrates usage of pipeline.Out to read processed data.
 func TestIntegrationPipeline_Out(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -136,6 +144,7 @@ func TestIntegrationPipeline_Out(t *testing.T) {
 	}
 }
 
+// TestIntegrationPipeline_Sink checks using a Sinker to consume pipeline outputs.
 func TestIntegrationPipeline_Sink(t *testing.T) {
 	type testCase struct {
 		name            string
@@ -164,7 +173,7 @@ func TestIntegrationPipeline_Sink(t *testing.T) {
 				sender.On("send", mock.Anything).Return(nil).Once()
 			},
 			assertions: func(sender *mockSender[int], errs <-chan error) {
-				assert.Len(t, errs, 0)
+				assert.Len(t, errs, 0) // no errors left in channel after sink
 				sender.AssertCalled(t, "send", 1)
 			},
 		},
@@ -195,12 +204,13 @@ func TestIntegrationPipeline_Sink(t *testing.T) {
 	}
 }
 
+// TestIntegrationPipeline_Tee checks splitting the pipeline output with Tee().
 func TestIntegrationPipeline_Tee(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       []int
 		process     StreamFunc[int, int]
-		pipeProcess StreamFunc[int, int]
+		pipeProcess StreamFunc[int, int] // Not used in the test, but left for clarity
 		wantOutput  []int
 	}{
 		{
@@ -252,6 +262,7 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 			).Start(
 				tt.process,
 			).Tee(datastreams.Params{BufferSize: len(tt.input) + 1})
+
 			var gotOutput1, gotOutput2 []int
 			for v := range out1.Out() {
 				gotOutput1 = append(gotOutput1, v)
@@ -259,12 +270,14 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 			for v := range out2.Out() {
 				gotOutput2 = append(gotOutput2, v)
 			}
+
 			assert.ElementsMatch(t, tt.wantOutput, gotOutput1)
 			assert.ElementsMatch(t, tt.wantOutput, gotOutput2)
 		})
 	}
 }
 
+// TestPipeline_ToSource verifies converting a pipeline's sink to a sourcer for another pipeline.
 func TestPipeline_ToSource(t *testing.T) {
 	t.Run("should create a source from all the streams", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -288,17 +301,57 @@ func TestPipeline_ToSource(t *testing.T) {
 		source := New[int, string](ctx, consumer, errs).Start(
 			streamProc,
 		).ToSource()
+
 		var consumedValues []string
 		for v := range source.Source(ctx, errs).Out() {
 			consumedValues = append(consumedValues, v)
 		}
-		assert.ElementsMatch(t, consumedValues, []string{"processed B", "processed C", "processed D"})
-
+		assert.ElementsMatch(t, []string{"processed B", "processed C", "processed D"}, consumedValues)
 	})
 }
 
+// ExampleNew demonstrates a minimal pipeline creation and usage.
+func ExampleNew() {
+	errChan := make(chan error, 3)
+	defer close(errChan)
+	inChan := make(chan int, 5)
+
+	// Create a new Pipeline with int -> int
+	pl := New[int, int](
+		context.Background(),
+		sources.FromChannel(inChan),
+		errChan,
+	)
+
+	// Provide data on inChan
+	go func() {
+		for i := 1; i <= 5; i++ {
+			inChan <- i
+		}
+		close(inChan)
+	}()
+
+	// Process the data: multiply by 2
+	pl.Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+		return ds.Run(func(v int) (int, error) {
+			return v * 2, nil
+		})
+	})
+
+	// Read pipeline output until closed
+	for val := range pl.Out() {
+		fmt.Println("Result:", val)
+	}
+	// Output:
+	// Result: 2
+	// Result: 4
+	// Result: 6
+	// Result: 8
+	// Result: 10
+}
+
 // ExamplePipeline_Stream demonstrates how to create and use a simple Pipeline
-// that processes integer inputs by doubling their values and then returns an output datastreams.DataStream.
+// that processes integer inputs by doubling their values and then returns an output DataStream.
 func ExamplePipeline_Stream() {
 	errChan := make(chan error, 3)
 	defer close(errChan)
@@ -322,8 +375,7 @@ func ExamplePipeline_Stream() {
 
 	// Send values to the pipeline's source channel
 	go func() {
-		arr := []int{1, 2, 3, 4, 5}
-		for _, val := range arr {
+		for _, val := range []int{1, 2, 3, 4, 5} {
 			inChan <- val
 		}
 		close(inChan)
@@ -366,8 +418,7 @@ func ExamplePipeline_Start() {
 
 	// Send values to the pipeline's source channel
 	go func() {
-		arr := []int{1, 2, 3, 4, 5}
-		for _, val := range arr {
+		for _, val := range []int{1, 2, 3, 4, 5} {
 			inChan <- val
 		}
 		close(inChan)
@@ -386,7 +437,8 @@ func ExamplePipeline_Start() {
 }
 
 // ExamplePipeline_Tee demonstrates how to create and use a simple Pipeline
-// that processes integer inputs by doubling their values and then tees the output.
+// that processes integer inputs by doubling their values and then tees the output
+// into two distinct streams.
 func ExamplePipeline_Tee() {
 	errChan := make(chan error)
 	defer close(errChan)
@@ -426,7 +478,7 @@ func ExamplePipeline_Tee() {
 }
 
 // ExamplePipeline_Map demonstrates how to create and use a simple Pipeline
-// that maps one type to another.
+// that maps one type (int) to another (string).
 func ExamplePipeline_Map() {
 	errChan := make(chan error)
 	defer close(errChan)
@@ -454,13 +506,16 @@ func ExamplePipeline_Map() {
 }
 
 // ExamplePipeline_Sink demonstrates how to create and use a simple Pipeline that
-// sinks the output to a sinks.ToChannel
+// sinks the output to a sinks.ToChannel.
 func ExamplePipeline_Sink() {
 	errChan := make(chan error)
 	outChan := make(chan string)
+	var wg sync.WaitGroup
+	wg.Add(5)
 	go func() {
 		for out := range outChan { // Read Pipeline output
-			fmt.Println("published:", out)
+			fmt.Println("out:", out)
+			wg.Done()
 		}
 	}()
 
@@ -480,13 +535,14 @@ func ExamplePipeline_Sink() {
 	); err != nil {
 		fmt.Println("error sinking:", err)
 	}
+	wg.Wait()
 
 	// Output:
-	// published: Im a string now: 1
-	// published: Im a string now: 2
-	// published: Im a string now: 3
-	// published: Im a string now: 4
-	// published: Im a string now: 5
+	// out: Im a string now: 1
+	// out: Im a string now: 2
+	// out: Im a string now: 3
+	// out: Im a string now: 4
+	// out: Im a string now: 5
 }
 
 // ExamplePipeline_ToSource demonstrates how to turn a Pipeline into a source
@@ -496,6 +552,7 @@ func ExamplePipeline_ToSource() {
 	defer cancel()
 	errChan := make(chan error, 1)
 	defer close(errChan)
+
 	source := New[int, string](
 		ctx,
 		sources.FromArray([]int{1, 2, 3}),
@@ -512,6 +569,7 @@ func ExamplePipeline_ToSource() {
 			)
 		},
 	).ToSource()
+
 	for v := range source.Source(ctx, errChan).Out() {
 		fmt.Println(v)
 	}
@@ -520,4 +578,176 @@ func ExamplePipeline_ToSource() {
 	// processed B
 	// processed C
 	// processed D
+}
+
+// TestIntegrationPipeline_Close verifies that closing the pipeline cancels everything quickly.
+func TestIntegrationPipeline_Close(t *testing.T) {
+	in := make(chan int)
+	errChan := make(chan error, 10)
+	p := New[int, int](context.Background(), sources.FromChannel(in), errChan).
+		Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+			return ds.Run(func(v int) (int, error) {
+				return v * 2, nil
+			})
+		})
+
+	p.Close() // Cancel the pipeline immediately
+
+	// Attempt to read from out
+	select {
+	case _, ok := <-p.Out():
+		_ = ok // doesn't matter, but we want to see if channel closed
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Pipeline output did not close after pipeline.Close() call")
+	}
+}
+
+func TestIntegrationPipeline_Wait(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           []int
+		cancelContext   bool
+		wantOutput      []int
+		expectWaitToEnd bool
+	}{
+		{
+			name:            "normal completion",
+			input:           []int{1, 2, 3, 4, 5},
+			cancelContext:   false,
+			wantOutput:      []int{2, 4, 6, 8, 10},
+			expectWaitToEnd: true,
+		},
+		{
+			name:            "context canceled before consuming all input",
+			input:           []int{1, 2, 3, 4, 5},
+			cancelContext:   true,
+			wantOutput:      []int{}, // We won't reliably get output because context is canceled
+			expectWaitToEnd: true,
+		},
+		{
+			name:            "no input (empty source)",
+			input:           []int{},
+			cancelContext:   false,
+			wantOutput:      []int{},
+			expectWaitToEnd: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancelFn := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancelFn()
+
+			errChan := make(chan error, len(tt.input)*2)
+
+			// Create the pipeline. It processes each input by multiplying by 2.
+			pipeline := New[int, int](ctx, NewMockSource(tt.input), errChan).
+				Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+					return ds.Run(func(v int) (int, error) {
+						return v * 2, nil
+					})
+				})
+
+			// Optionally cancel the context to simulate an abrupt stop.
+			if tt.cancelContext {
+				cancelFn()
+			}
+
+			// We'll collect the final outputs from pipeline.Out()
+			var gotOutput []int
+			doneReading := make(chan struct{})
+
+			go func() {
+				defer close(doneReading)
+				for val := range pipeline.Out() {
+					gotOutput = append(gotOutput, val)
+				}
+			}()
+
+			// Now we call Wait() in the main goroutine to block until
+			// all pipeline goroutines are finished.
+			waitDone := make(chan struct{})
+			go func() {
+				pipeline.Wait()
+				close(waitDone)
+			}()
+
+			// Check if Wait returns by the deadline
+			select {
+			case <-waitDone:
+				if !tt.expectWaitToEnd {
+					t.Fatal("Wait ended unexpectedly; test expected it to block")
+				}
+			case <-time.After(10 * time.Second):
+				if tt.expectWaitToEnd {
+					t.Fatal("Wait did not return in time")
+				}
+			}
+
+			<-doneReading // ensure we finish reading pipeline outputs
+
+			// Verify final pipeline output matches expectation if not canceled
+			if !tt.cancelContext {
+				assert.ElementsMatch(t, tt.wantOutput, gotOutput)
+			}
+
+			// Verify the pipeline's error channel has been closed
+			_, open := <-errChan
+			assert.False(t, open, "errorChan should be closed after Wait returns")
+		})
+	}
+}
+
+type MockSource[T any] struct {
+	out      chan T
+	messages []T
+}
+
+func NewMockSource[T any](messages []T) *MockSource[T] {
+	out := make(chan T, len(messages))
+	return &MockSource[T]{out: out, messages: messages}
+}
+
+func (m *MockSource[T]) Source(ctx context.Context, errSender chan<- error) datastreams.DataStream[T] {
+	defer close(m.out)
+	for _, msg := range m.messages {
+		m.out <- msg
+	}
+	return datastreams.New[T](ctx, m.out, errSender)
+}
+
+type sender[T any] interface {
+	send(input T) error
+}
+
+type mockSender[T any] struct {
+	mock.Mock
+}
+
+func (m *mockSender[T]) send(input T) error {
+	args := m.Called(input)
+	return args.Error(0)
+}
+
+func newMockSender[T any]() *mockSender[T] {
+	return &mockSender[T]{}
+}
+
+type sinker[T any] struct {
+	sender sender[T]
+}
+
+func newMockSinker[T any](sender sender[T]) datastreams.Sinker[T] {
+	return &sinker[T]{
+		sender: sender,
+	}
+}
+
+func (m *sinker[T]) Sink(_ context.Context, ds datastreams.DataStream[T]) error {
+	for input := range ds.Out() {
+		if err := m.sender.send(input); err != nil {
+			return fmt.Errorf("publisher error: %w", err)
+		}
+	}
+	return nil
 }
