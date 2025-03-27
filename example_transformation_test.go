@@ -1,4 +1,4 @@
-package main
+package pipelines_test
 
 import (
 	"context"
@@ -10,45 +10,43 @@ import (
 	"github.com/elastiflow/pipelines/datastreams/sources"
 )
 
-func createIntArr(num int) []int {
-	var arr []int
-	for i := 0; i < num; i++ {
-		arr = append(arr, i)
-	}
-	return arr
-}
-
+// squareOdds is a basic function to demonstrate transformations in the pipeline.
 func squareOdds(v int) (int, error) {
 	return v * v, nil
 }
 
-func mapFunc(p int) (string, error) {
-	return fmt.Sprintf("Im a squared number: %d", p), nil
+// mapTransformFunc formats the squared integer as a string.
+func mapTransformFunc(p int) (string, error) {
+	return fmt.Sprintf("I'm a squared number: %d", p), nil
 }
 
-func main() {
-	inChan := make(chan int) // Setup channels and cleanup
+func Example_transformations() {
+	inChan := make(chan int) // Setup channels
 	errChan := make(chan error, 10)
 	defer func() {
 		close(inChan)
 		close(errChan)
 	}()
-	pl := pipelines.New[int, string]( // Create a new Pipeline
+
+	// Create a new Pipeline of int->string
+	pl := pipelines.New[int, string](
 		context.Background(),
 		sources.FromArray(createIntArr(10)),
 		errChan,
 	).Start(func(p datastreams.DataStream[int]) datastreams.DataStream[string] {
+		// OrDone -> FanOut(2) -> Run (squareOdds) -> Map to string
 		return datastreams.Map(
 			p.OrDone().FanOut(
 				datastreams.Params{Num: 2},
 			).Run(
 				squareOdds,
 			),
-			mapFunc,
+			mapTransformFunc,
 		)
 	})
 
-	go func(errReceiver <-chan error) { // Handle Pipeline errors
+	// Handle errors
+	go func(errReceiver <-chan error) {
 		defer pl.Close()
 		for err := range errReceiver {
 			if err != nil {
@@ -57,19 +55,17 @@ func main() {
 			}
 		}
 	}(pl.Errors())
-	for out := range pl.Out() { // Read Pipeline output
+
+	// Read pipeline output
+	for out := range pl.Out() {
 		slog.Info("received simple pipeline output", slog.String("out", out))
 	}
 
-	// Output:
+	// Output (example):
 	// {"out":"I'm a squared number: 0"}
 	// {"out":"I'm a squared number: 1"}
 	// {"out":"I'm a squared number: 4"}
 	// {"out":"I'm a squared number: 9"}
-	// {"out":"I'm a squared number: 16"}
-	// {"out":"I'm a squared number: 25"}
-	// {"out":"I'm a squared number: 36"}
-	// {"out":"I'm a squared number: 49"}
-	// {"out":"I'm a squared number: 64"}
+	// ...
 	// {"out":"I'm a squared number: 81"}
 }

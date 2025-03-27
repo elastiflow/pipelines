@@ -1,4 +1,4 @@
-package main
+package pipelines_test
 
 import (
 	"context"
@@ -11,23 +11,17 @@ import (
 	"github.com/elastiflow/pipelines/datastreams/sources"
 )
 
-func createIntArr(num int) []int {
-	var arr []int
-	for i := 0; i < num; i++ {
-		arr = append(arr, i)
-	}
-	return arr
-}
-
+// filter returns true if the input int is even, false otherwise.
 func filter(p int) (bool, error) {
 	return p%2 == 0, nil
 }
 
+// mapFunc transforms an even integer into a descriptive string.
 func mapFunc(p int) (string, error) {
-	return fmt.Sprintf("Im an even number: %d", p), nil
+	return fmt.Sprintf("I'm an even number: %d", p), nil
 }
 
-func main() {
+func Example_filter() {
 	errChan := make(chan error, 10)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer func() {
@@ -35,6 +29,7 @@ func main() {
 		cancel()
 	}()
 
+	// Build a pipeline that fans out, then filters even numbers, then maps to string
 	pl := pipelines.New[int, string](
 		ctx,
 		sources.FromArray(createIntArr(10)),
@@ -54,7 +49,7 @@ func main() {
 		slog.Info("received simple pipeline output", slog.String("out", val))
 	}
 
-	// Output:
+	// Output (example):
 	// {"out":"I'm an even number: 0"}
 	// {"out":"I'm an even number: 2"}
 	// {"out":"I'm an even number: 4"}
