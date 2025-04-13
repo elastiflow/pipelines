@@ -15,6 +15,8 @@ type ExpandFunc[T any, U any] func(T) ([]U, error)
 // This function type is used to filter a given input type
 type FilterFunc[T any] func(T) (bool, error)
 
+type KeyFunc[T any, K comparable] func(T) K
+
 type receivers[T any] []<-chan T
 type senders[T any] []chan<- T
 type pipes[T any] []chan T
