@@ -331,6 +331,10 @@ func (p DataStream[T]) Tee(
 	return nextPipe1, nextPipe2
 }
 
+func (p DataStream[T]) nextT(pipeType pipeType, params Params) (DataStream[T], pipes[T]) {
+	return next[T](pipeType, params, len(p.inStreams), p.ctx, p.errStream, p.wg)
+}
+
 // Map is a package-level function that transforms each item from T to U using a TransformFunc.
 func Map[T any, U any](
 	ds DataStream[T],
@@ -397,10 +401,6 @@ func next[T any](
 			wg:        wg,
 		},
 		streams
-}
-
-func (p DataStream[T]) nextT(pipeType pipeType, params Params) (DataStream[T], pipes[T]) {
-	return next[T](pipeType, params, len(p.inStreams), p.ctx, p.errStream, p.wg)
 }
 
 // orDone helps forward values until context is canceled or the stream ends.
