@@ -43,6 +43,12 @@ func (p DataStream[T]) incrementWaitGroup(delta int) {
 	}
 }
 
+func (p DataStream[T]) decrementWaitGroup() {
+	if p.wg != nil {
+		p.wg.Done()
+	}
+}
+
 // Out returns the single output channel of this DataStream.
 // If the DataStream has multiple input channels, it automatically FanIns them into a single output.
 func (p DataStream[T]) Out() <-chan T {
