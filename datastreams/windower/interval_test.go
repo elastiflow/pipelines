@@ -2,6 +2,7 @@ package windower
 
 import (
 	"context"
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
@@ -20,20 +21,21 @@ func TestTumblingTime_Publish(t *testing.T) {
 	defer cancel()
 
 	errs := make(chan error, 10)
-	w := NewInterval[int, int](ctx, aggregatorFunc, errs, 200*time.Millisecond)
-	out := w.Initialize()
+	out := make(pipes.Pipes[int], 1)
+	out.Initialize(10)
+	w := NewInterval[int, int](ctx, out, aggregatorFunc, errs, 200*time.Millisecond)
 
 	go func() {
-		defer w.Close()
+		defer out.Close()
 		for i := 1; i <= 10; i++ {
-			w.Push(i, time.Now())
+			w.Push(i)
 			time.Sleep(50 * time.Millisecond)
 		}
 	}()
 
 	var results []int
-	for r := range out {
-		results = append(results, r)
+	for res := range out[0] {
+		results = append(results, res)
 	}
 
 	// The expected results are the sums of the intervals:
