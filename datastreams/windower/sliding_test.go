@@ -81,18 +81,64 @@ func TestSlidingWindow_ProcError(t *testing.T) {
 	}()
 
 	var gotErrs []error
-loop:
 	for {
 		select {
 		case e := <-errs:
 			gotErrs = append(gotErrs, e)
 		case <-ctx.Done():
-			break loop
+			assert.NotEmpty(t, gotErrs, "expected at least one error")
+			for _, e := range gotErrs {
+				assert.Equal(t, wantErr, e)
+			}
+			return
 		}
 	}
+}
 
-	assert.NotEmpty(t, gotErrs, "expected at least one error")
-	for _, e := range gotErrs {
-		assert.Equal(t, wantErr, e)
+func BenchmarkSlidingWindow(b *testing.B) {
+	// aggregator sums the window slice
+	aggregator := func(items []int) (int, error) {
+		sum := 0
+		for _, x := range items {
+			sum += x
+		}
+		return sum, nil
 	}
+	// 1. One‑time setup:
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errs := make(chan error, 1)
+	out := make(pipes.Pipes[int], 3)
+	out.Initialize(128)
+
+	w := NewSliding[int, int](ctx, out, aggregator, errs,
+		100*time.Millisecond, 50*time.Millisecond)
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				w.Push(1)
+				w.Push(2)
+				w.Push(3)
+			}
+		}
+	}()
+
+	// 2. Reset the timer so setup time isn’t counted:
+	b.ResetTimer()
+
+	// 3. Measured loop:
+	for i := 0; i < b.N; i++ {
+		// e.g. push one more batch of items:
+		w.Push(4)
+		w.Push(5)
+		w.Push(6)
+	}
+
+	// 4. (Optional) stop timer, then wait for goroutines to finish:
+	b.StopTimer()
+	w.Close()
 }
