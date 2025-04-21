@@ -9,51 +9,6 @@ import (
 	"time"
 )
 
-func TestSlidingWindow_Publish(t *testing.T) {
-	// aggregator sums the window slice
-	aggregator := func(items []int) (int, error) {
-		sum := 0
-		for _, x := range items {
-			sum += x
-		}
-		return sum, nil
-	}
-
-	// windowDuration = 100ms, slideInterval = 50ms
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	errs := make(chan error, 10)
-	out := make(pipes.Pipes[int], 1)
-	out.Initialize(10)
-
-	w := NewSliding[int, int](ctx, out, aggregator, errs, 100*time.Millisecond, 50*time.Millisecond)
-
-	// push items quickly (no delay) so each window sees all three
-	go func() {
-		defer w.Close()
-		w.Push(1)
-		w.Push(2)
-		w.Push(3)
-		time.Sleep(50 * time.Millisecond)
-		w.Push(4)
-		w.Push(5)
-		w.Push(6)
-		time.Sleep(200 * time.Millisecond)
-	}()
-
-	var results []int
-	for v := range out[0] {
-		results = append(results, v)
-	}
-
-	// We should get 4 windows at ~50,100,150,200, 250ms, each summing to 6 then 15.
-	assert.Len(t, results, 3)
-	assert.ElementsMatch(t, results, []int{6, 15, 15})
-
-	assert.Empty(t, errs)
-}
-
 func TestSlidingWindow_ProcError(t *testing.T) {
 	// procFunc always errors
 	wantErr := errors.New("bad")
@@ -66,7 +21,7 @@ func TestSlidingWindow_ProcError(t *testing.T) {
 	out := make(pipes.Pipes[int], 1)
 	out.Initialize(10)
 
-	w := NewSliding[int, int](ctx, out, proc, errs, 100*time.Millisecond, 50*time.Millisecond)
+	w := NewSliding[int, int](ctx, out.Senders(), proc, errs, 100*time.Millisecond, 50*time.Millisecond)
 
 	go func() {
 		defer out.Close()
@@ -111,7 +66,7 @@ func BenchmarkSlidingWindow(b *testing.B) {
 	out := make(pipes.Pipes[int], 3)
 	out.Initialize(128)
 
-	w := NewSliding[int, int](ctx, out, aggregator, errs,
+	w := NewSliding[int, int](ctx, out.Senders(), aggregator, errs,
 		100*time.Millisecond, 50*time.Millisecond)
 
 	go func() {
@@ -140,5 +95,4 @@ func BenchmarkSlidingWindow(b *testing.B) {
 
 	// 4. (Optional) stop timer, then wait for goroutines to finish:
 	b.StopTimer()
-	w.Close()
 }

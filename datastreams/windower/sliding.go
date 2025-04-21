@@ -32,7 +32,7 @@ type sliding[T any, R any] struct {
 // NewSliding constructs a sliding window partition that starts ticking immediately.
 func NewSliding[T any, R any](
 	ctx context.Context,
-	out pipes.Pipes[R],
+	out pipes.Senders[R],
 	procFunc func([]T) (R, error),
 	errs chan<- error,
 	windowDuration, slideInterval time.Duration,
@@ -114,9 +114,4 @@ func (s *sliding[T, R]) flush(now time.Time, final bool) {
 
 	// publish
 	s.Flush(s.Ctx, window, s.procFunc, s.Errs)
-}
-
-// Close closes the output pipes.
-func (s *sliding[T, R]) Close() {
-	s.Base.Close()
 }

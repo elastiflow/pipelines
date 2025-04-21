@@ -28,11 +28,3 @@ func (s *store[T, K, R]) set(k K, w Partition[T, R]) Partition[T, R] {
 	s.partitions[k] = w
 	return w
 }
-
-func (s *store[T, K, R]) close() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, w := range s.partitions {
-		w.Close()
-	}
-}
