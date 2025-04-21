@@ -3,7 +3,6 @@ package partition
 import (
 	"context"
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
-	"sync"
 	"time"
 )
 
@@ -14,7 +13,6 @@ type TimeMarker interface {
 type Partition[T any, R any] interface {
 	// Push is called to send an item to the partition.
 	Push(item T)
-	Close()
 }
 
 type WatermarkGenerator[T any] interface {
@@ -29,7 +27,7 @@ type WatermarkGenerator[T any] interface {
 
 type Factory[T any, R any] func(
 	ctx context.Context,
-	out pipes.Pipes[R],
+	out pipes.Senders[R],
 	errs chan<- error,
 ) Partition[T, R]
 
@@ -38,10 +36,9 @@ type manager[T any, K comparable, R any] struct {
 	errs        chan<- error
 	factory     Factory[T, R]
 	generator   WatermarkGenerator[T]
-	outChannels pipes.Pipes[R]
+	outChannels pipes.Senders[R]
 	store       *store[T, K, R]
 	timeMarker  TimeMarker
-	wg          *sync.WaitGroup
 }
 
 type Partitioner[T any, K comparable, R any] interface {
@@ -49,11 +46,12 @@ type Partitioner[T any, K comparable, R any] interface {
 	//  Key: the key to partition by
 	//  Value: the value to send
 	Partition(key K, value T)
+	Keys() []K
 }
 
 func NewPartitioner[T any, K comparable, R any](
 	ctx context.Context,
-	out pipes.Pipes[R],
+	out pipes.Senders[R],
 	errs chan<- error,
 	factory Factory[T, R],
 	timeMarker TimeMarker,
@@ -67,7 +65,6 @@ func NewPartitioner[T any, K comparable, R any](
 		outChannels: out,
 		store:       newStore[T, K, R](),
 		timeMarker:  timeMarker,
-		wg:          &sync.WaitGroup{},
 	}
 }
 
@@ -79,10 +76,25 @@ func (m *manager[T, K, R]) Partition(key K, value T) {
 	}
 
 	eventTime := time.Now()
+	if m.timeMarker != nil {
+		eventTime = m.timeMarker.Now()
+	}
+
 	if m.generator != nil {
 		m.generator.OnEvent(value, eventTime)
 		eventTime = m.generator.GetWatermark()
 	}
 
 	p.Push(value)
+}
+
+func (m *manager[T, K, R]) Keys() []K {
+	m.store.mu.RLock()
+	defer m.store.mu.RUnlock()
+
+	keys := make([]K, 0, len(m.store.partitions))
+	for k := range m.store.partitions {
+		keys = append(keys, k)
+	}
+	return keys
 }

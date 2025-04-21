@@ -48,13 +48,13 @@ type Base[T any, R any] struct {
 	Ctx   context.Context
 	Batch *Batch[T]
 	Errs  chan<- error
-	out   pipes.Pipes[R]
+	out   pipes.Senders[R]
 }
 
 // NewBase constructs a new Base instance.
 func NewBase[T any, R any](
 	ctx context.Context,
-	out pipes.Pipes[R],
+	out pipes.Senders[R],
 	errs chan<- error,
 ) *Base[T, R] {
 	return &Base[T, R]{
@@ -63,10 +63,6 @@ func NewBase[T any, R any](
 		Errs:  errs,
 		out:   out,
 	}
-}
-
-func (b *Base[T, R]) Close() {
-	b.out.Close()
 }
 
 // Push adds an item to the in-memory buffer.
@@ -86,6 +82,7 @@ func (b *Base[T, R]) Flush(
 		errs <- err
 		return
 	}
+
 	for _, outChannel := range b.out {
 		select {
 		case <-ctx.Done():

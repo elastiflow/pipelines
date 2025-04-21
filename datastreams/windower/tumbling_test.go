@@ -27,13 +27,13 @@ func TestTumblingWindow_Publish(t *testing.T) {
 	errs := make(chan error, 10)
 	out := make(pipes.Pipes[int], 1)
 	out.Initialize(10)
+	defer out.Close()
 
 	// windowDuration = 200ms
-	w := NewTumbling[int, int](ctx, out, aggregatorFunc, errs, 200*time.Millisecond)
+	w := NewTumbling[int, int](ctx, out.Senders(), aggregatorFunc, errs, 200*time.Millisecond)
 
 	// push 8 items, one every 50ms → exactly two windows of 4 items each
 	go func() {
-		defer out.Close()
 		for i := 1; i <= 8; i++ {
 			w.Push(i)
 			time.Sleep(50 * time.Millisecond)
@@ -41,13 +41,16 @@ func TestTumblingWindow_Publish(t *testing.T) {
 	}()
 
 	var results []int
-	for v := range out[0] {
-		results = append(results, v)
+	for {
+		select {
+		case v := <-out[0]:
+			results = append(results, v)
+		case <-ctx.Done():
+			assert.ElementsMatch(t, []int{10, 26}, results)
+			assert.Empty(t, errs)
+			return
+		}
 	}
-
-	// Expect two windows: 1+2+3+4=10, 5+6+7+8=26
-	assert.ElementsMatch(t, []int{10, 26}, results)
-	assert.Empty(t, errs)
 }
 
 func TestTumblingWindow_ProcError(t *testing.T) {
@@ -62,8 +65,7 @@ func TestTumblingWindow_ProcError(t *testing.T) {
 	out := make(pipes.Pipes[int], 1)
 	out.Initialize(10)
 
-	w := NewTumbling[int, int](ctx, out, proc, errs, 200*time.Millisecond)
-
+	w := NewTumbling[int, int](ctx, out.Senders(), proc, errs, 200*time.Millisecond)
 	// push 8 items, one every 50ms → exactly two windows of 4 items each
 	go func() {
 		defer out.Close()
@@ -99,7 +101,7 @@ func BenchmarkTumblingWindow(b *testing.B) {
 	out := make(pipes.Pipes[int], 1)
 	out.Initialize(10)
 
-	w := NewTumbling[int, int](ctx, out, aggregator, errs, 200*time.Millisecond)
+	w := NewTumbling[int, int](ctx, out.Senders(), aggregator, errs, 200*time.Millisecond)
 
 	go func() {
 		for {
@@ -127,5 +129,4 @@ func BenchmarkTumblingWindow(b *testing.B) {
 
 	// 4. (Optional) stop timer, then wait for goroutines to finish:
 	b.StopTimer()
-	w.Close()
 }

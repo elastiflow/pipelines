@@ -27,7 +27,7 @@ type tumbling[T any, R any] struct {
 // after a flush will start a new window timer.
 func NewTumbling[T any, R any](
 	ctx context.Context,
-	out pipes.Pipes[R],
+	out pipes.Senders[R],
 	procFunc func([]T) (R, error),
 	errs chan<- error,
 	windowDuration time.Duration,
@@ -74,9 +74,4 @@ func (t *tumbling[T, R]) waitAndFlush() {
 		t.timerStarted = false
 		t.mu.Unlock()
 	}
-}
-
-// Close closes the output pipes.
-func (t *tumbling[T, R]) Close() {
-	t.Base.Close()
 }

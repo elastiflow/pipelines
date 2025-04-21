@@ -2,6 +2,7 @@ package datastreams
 
 import (
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
 
 // KeyedDataStream represents a stream of data elements partitioned by a key of type K, derived using a key function.
@@ -46,6 +47,7 @@ func KeyBy[T any, K comparable](
 		ds.incrementWaitGroup(1)
 		go func(inStream <-chan T, outChannel chan<- T) {
 			defer ds.decrementWaitGroup()
+			defer close(outChannel)
 			for {
 				select {
 				case <-ds.ctx.Done():
@@ -54,7 +56,11 @@ func KeyBy[T any, K comparable](
 					if !ok {
 						return
 					}
-					outChannel <- item
+					select {
+					case outChannel <- item:
+					case <-ds.ctx.Done():
+						return
+					}
 				}
 			}
 		}(inStream, outChannels[i])
@@ -72,6 +78,7 @@ func Window[T any, K comparable, R any](
 	param ...Params,
 ) KeyedDataStream[R, K] {
 	p := applyParams(param...)
+
 	nextPipe, outChannels := next[R](standard, p, len(keyedDs.inStreams), keyedDs.ctx, keyedDs.errStream, keyedDs.wg)
 	kdOut := KeyedDataStream[R, K]{
 		DataStream: nextPipe,
@@ -79,9 +86,12 @@ func Window[T any, K comparable, R any](
 		timeMarker: keyedDs.timeMarker,
 	}
 
+	partitionPipes := make(pipes.Pipes[R], len(keyedDs.inStreams))
+	partitionPipes.Initialize(p.BufferSize)
+
 	pm := partition.NewPartitioner[T, K, R](
 		keyedDs.ctx,
-		outChannels,
+		partitionPipes.Senders(),
 		keyedDs.errStream,
 		wf,
 		keyedDs.timeMarker,
@@ -105,6 +115,26 @@ func Window[T any, K comparable, R any](
 				}
 			}
 		}(pm, in)
+	}
+
+	recs := partitionPipes.Receivers()
+	for i, outStream := range outChannels.Senders() {
+		keyedDs.incrementWaitGroup(1)
+		go func(in <-chan R, out chan<- R) {
+			defer keyedDs.decrementWaitGroup()
+			defer close(out)
+			for {
+				select {
+				case <-keyedDs.ctx.Done():
+					return
+				case item, ok := <-in:
+					if !ok {
+						return
+					}
+					out <- item
+				}
+			}
+		}(recs[i], outStream)
 	}
 
 	return kdOut

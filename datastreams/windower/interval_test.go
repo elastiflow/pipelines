@@ -23,10 +23,10 @@ func TestTumblingTime_Publish(t *testing.T) {
 	errs := make(chan error, 10)
 	out := make(pipes.Pipes[int], 1)
 	out.Initialize(10)
-	w := NewInterval[int, int](ctx, out, aggregatorFunc, errs, 200*time.Millisecond)
+	defer out.Close()
 
+	w := NewInterval[int, int](ctx, out.Senders(), aggregatorFunc, errs, 200*time.Millisecond)
 	go func() {
-		defer out.Close()
 		for i := 1; i <= 10; i++ {
 			w.Push(i)
 			time.Sleep(50 * time.Millisecond)
@@ -34,11 +34,17 @@ func TestTumblingTime_Publish(t *testing.T) {
 	}()
 
 	var results []int
-	for res := range out[0] {
-		results = append(results, res)
+	for {
+		select {
+		case v := <-out[0]:
+			results = append(results, v)
+		case <-ctx.Done():
+			// The expected results are the sums of the intervals:
+			// 1+2+3+4 = 10, 5+6+7+8 = 26, 9+10 = 19
+			assert.ElementsMatch(t, []int{10, 26, 19}, results)
+			assert.Empty(t, errs)
+			return
+		}
 	}
 
-	// The expected results are the sums of the intervals:
-	// 1+2+3+4 = 10, 5+6+7+8 = 26
-	assert.ElementsMatch(t, []int{10, 26}, results)
 }
