@@ -52,8 +52,8 @@ type Partitioner[T any, K comparable, R any] interface {
 func NewPartitioner[T any, K comparable, R any](
 	ctx context.Context,
 	out pipes.Senders[R],
-	errs chan<- error,
 	factory Factory[T, R],
+	errs chan<- error,
 	timeMarker TimeMarker,
 	generator WatermarkGenerator[T],
 ) Partitioner[T, K, R] {
