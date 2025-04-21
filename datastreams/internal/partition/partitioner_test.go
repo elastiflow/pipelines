@@ -113,10 +113,10 @@ func TestPartitioner_Partition(t *testing.T) {
 			mgr := NewPartitioner[int, string, string](
 				context.Background(),
 				output.Senders(),
-				errs,
 				func(ctx context.Context, out pipes.Senders[string], errs chan<- error) Partition[int, string] {
 					return &mockPartition[int, string]{}
 				},
+				errs,
 				func() TimeMarker {
 					if tt.timeMarker != nil {
 						return tt.timeMarker

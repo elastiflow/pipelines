@@ -1,0 +1,25 @@
+name: Go checks
+concurrency:
+  group: go-checks-${{ github.ref }}
+  cancel-in-progress: true
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  go_checks:
+    name: Go checks
+    uses: elastiflow/gha-reusable-workflows/.github/workflows/reusable_go_checks.yml@v0
+    with:
+      configure_git_goprivate: true
+      unit_test_cmd: make test-unit
+      unit_test_report_coverage_cmd: make test-unit-enforce-coverage
+      unit_test_runs-on: ubuntu-latest-4c
+      go_version_file: "go.mod" # Use go.work if Go workspaces are used
+      sonarcloud_run: false # set to true to enable SonarCloud analysis
+      sonarcloud_project_key: "elastiflow_projectname" # set the project key for SonarCloud
+    secrets:
+      go_dependency_fetcher_token: ${{ secrets.GO_DEPENDENCY_FETCH_TOKEN }}
+      sonarcloud_token: ${{ secrets.SONAR_TOKEN }}
