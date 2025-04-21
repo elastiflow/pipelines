@@ -13,6 +13,8 @@ const (
 	FILTER
 	MAP
 	SINK
+	KEY_BY
+	WINDOW
 	EXPAND
 )
 
@@ -23,6 +25,8 @@ func (w ErrorCode) String() string {
 		"FILTER",
 		"MAP",
 		"SINK",
+		"KEY_BY",
+		"WINDOW",
 		"EXPAND",
 	}[w]
 }
