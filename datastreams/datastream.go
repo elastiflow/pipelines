@@ -2,6 +2,7 @@ package datastreams
 
 import (
 	"context"
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sync"
 )
 
@@ -40,6 +41,12 @@ func (p DataStream[T]) WithWaitGroup(wg *sync.WaitGroup) DataStream[T] {
 func (p DataStream[T]) incrementWaitGroup(delta int) {
 	if p.wg != nil {
 		p.wg.Add(delta)
+	}
+}
+
+func (p DataStream[T]) decrementWaitGroup() {
+	if p.wg != nil {
+		p.wg.Done()
 	}
 }
 
@@ -184,7 +191,7 @@ func (p DataStream[T]) FanOut(
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(fanOut, param)
 	p.incrementWaitGroup(1)
-	go func(inStream <-chan T, outStreams senders[T]) {
+	go func(inStream <-chan T, outStreams pipes.Senders[T]) {
 		if p.wg != nil {
 			defer p.wg.Done()
 		}
@@ -279,7 +286,7 @@ func (p DataStream[T]) Broadcast(
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(broadcast, param)
 	p.incrementWaitGroup(1)
-	go func(inStream <-chan T, outStreams senders[T]) {
+	go func(inStream <-chan T, outStreams pipes.Senders[T]) {
 		if p.wg != nil {
 			defer p.wg.Done()
 		}
@@ -331,6 +338,10 @@ func (p DataStream[T]) Tee(
 	return nextPipe1, nextPipe2
 }
 
+func (p DataStream[T]) nextT(pipeType pipeType, params Params) (DataStream[T], pipes.Pipes[T]) {
+	return next[T](pipeType, params, len(p.inStreams), p.ctx, p.errStream, p.wg)
+}
+
 // Map is a package-level function that transforms each item from T to U using a TransformFunc.
 func Map[T any, U any](
 	ds DataStream[T],
@@ -380,7 +391,7 @@ func next[T any](
 	ctx context.Context,
 	errStream chan<- error,
 	wg *sync.WaitGroup,
-) (DataStream[T], pipes[T]) {
+) (DataStream[T], pipes.Pipes[T]) {
 	switch pipeType {
 	case fanOut, broadcast:
 		chanCount = params.Num
@@ -388,7 +399,7 @@ func next[T any](
 		chanCount = 1
 	default:
 	}
-	streams := make(pipes[T], chanCount)
+	streams := make(pipes.Pipes[T], chanCount)
 	streams.Initialize(params.BufferSize)
 	return DataStream[T]{
 			ctx:       ctx,
@@ -397,10 +408,6 @@ func next[T any](
 			wg:        wg,
 		},
 		streams
-}
-
-func (p DataStream[T]) nextT(pipeType pipeType, params Params) (DataStream[T], pipes[T]) {
-	return next[T](pipeType, params, len(p.inStreams), p.ctx, p.errStream, p.wg)
 }
 
 // orDone helps forward values until context is canceled or the stream ends.
