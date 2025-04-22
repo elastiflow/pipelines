@@ -1,4 +1,3 @@
-// file: windower/sliding.go
 package windower
 
 import (
@@ -7,7 +6,6 @@ import (
 	"time"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
 
 // record pairs a value with the moment it arrived.
@@ -29,10 +27,10 @@ type sliding[T any, R any] struct {
 	buffer []record[T]
 }
 
-// NewSliding constructs a sliding window partition that starts ticking immediately.
-func NewSliding[T any, R any](
+// newSliding constructs a sliding window partition that starts ticking immediately.
+func newSliding[T any, R any](
 	ctx context.Context,
-	out pipes.Senders[R],
+	out chan R,
 	procFunc func([]T) (R, error),
 	errs chan<- error,
 	windowDuration, slideInterval time.Duration,
@@ -57,8 +55,8 @@ func NewSliding[T any, R any](
 // Push appends the item with its arrival timestamp.
 func (s *sliding[T, R]) Push(item T) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.buffer = append(s.buffer, record[T]{val: item, ts: time.Now()})
-	s.mu.Unlock()
 }
 
 // run drives the periodic flushes.
@@ -114,4 +112,18 @@ func (s *sliding[T, R]) flush(now time.Time, final bool) {
 
 	// publish
 	s.Flush(s.Ctx, window, s.procFunc, s.Errs)
+}
+
+// NewSlidingFactory constructs a sliding window factory.
+func NewSlidingFactory[T any, R any](
+	procFunc func([]T) (R, error),
+	windowDuration, slideInterval time.Duration,
+) partition.Factory[T, R] {
+	return func(
+		ctx context.Context,
+		out chan R,
+		errs chan<- error,
+	) partition.Partition[T, R] {
+		return newSliding(ctx, out, procFunc, errs, windowDuration, slideInterval)
+	}
 }

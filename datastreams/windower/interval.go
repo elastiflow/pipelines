@@ -3,7 +3,6 @@ package windower
 import (
 	"context"
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"time"
 )
 
@@ -14,17 +13,17 @@ type timedInterval[T any, R any] struct {
 	procFunc func([]T) (R, error)
 }
 
-// NewInterval starts publishing *immediately*. If no items
+// newInterval starts publishing *immediately*. If no items
 // arrive in a window, we publish an empty batch.
-func NewInterval[T any, R any](
+func newInterval[T any, R any](
 	ctx context.Context,
-	outChannels pipes.Senders[R],
+	out chan R,
 	procFunc func([]T) (R, error),
 	errs chan<- error,
 	interval time.Duration,
 ) partition.Partition[T, R] {
 	w := &timedInterval[T, R]{
-		Base:     partition.NewBase[T, R](ctx, outChannels, errs),
+		Base:     partition.NewBase[T, R](ctx, out, errs),
 		interval: interval,
 		procFunc: procFunc,
 	}
@@ -61,9 +60,9 @@ func NewIntervalFactory[T any, R any](
 ) partition.Factory[T, R] {
 	return func(
 		ctx context.Context,
-		out pipes.Senders[R],
+		out chan R,
 		errs chan<- error,
 	) partition.Partition[T, R] {
-		return NewInterval[T, R](ctx, out, procFunc, errs, interval)
+		return newInterval[T, R](ctx, out, procFunc, errs, interval)
 	}
 }
