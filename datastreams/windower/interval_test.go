@@ -25,7 +25,7 @@ func TestTumblingTime_Publish(t *testing.T) {
 	out.Initialize(10)
 	defer out.Close()
 
-	w := NewInterval[int, int](ctx, out.Senders(), aggregatorFunc, errs, 200*time.Millisecond)
+	w := newInterval[int, int](ctx, out[0], aggregatorFunc, errs, 200*time.Millisecond)
 	go func() {
 		for i := 1; i <= 10; i++ {
 			w.Push(i)

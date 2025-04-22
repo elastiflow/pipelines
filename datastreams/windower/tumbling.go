@@ -1,4 +1,3 @@
-// file: windower/tumbling.go
 package windower
 
 import (
@@ -7,7 +6,6 @@ import (
 	"time"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
 
 // tumbling buffers items for windowDuration once the first item arrives.
@@ -23,11 +21,11 @@ type tumbling[T any, R any] struct {
 	timerStarted bool
 }
 
-// NewTumbling constructs a tumbling window partition. The first Push
+// newTumbling constructs a tumbling window partition. The first Push
 // after a flush will start a new window timer.
-func NewTumbling[T any, R any](
+func newTumbling[T any, R any](
 	ctx context.Context,
-	out pipes.Senders[R],
+	out chan R,
 	procFunc func([]T) (R, error),
 	errs chan<- error,
 	windowDuration time.Duration,
@@ -73,5 +71,22 @@ func (t *tumbling[T, R]) waitAndFlush() {
 		t.mu.Lock()
 		t.timerStarted = false
 		t.mu.Unlock()
+	}
+}
+
+// NewTumblingFactory constructs a factory function that can be used
+// to create new instances of tumbling. This is useful for
+// creating multiple instances with the same processing function and
+// window duration.
+func NewTumblingFactory[T any, R any](
+	procFunc func([]T) (R, error),
+	windowDuration time.Duration,
+) partition.Factory[T, R] {
+	return func(
+		ctx context.Context,
+		out chan R,
+		errs chan<- error,
+	) partition.Partition[T, R] {
+		return newTumbling(ctx, out, procFunc, errs, windowDuration)
 	}
 }

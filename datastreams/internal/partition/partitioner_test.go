@@ -112,8 +112,7 @@ func TestPartitioner_Partition(t *testing.T) {
 			// fresh store each test
 			mgr := NewPartitioner[int, string, string](
 				context.Background(),
-				output.Senders(),
-				func(ctx context.Context, out pipes.Senders[string], errs chan<- error) Partition[int, string] {
+				func(ctx context.Context, out chan string, errs chan<- error) Partition[int, string] {
 					return &mockPartition[int, string]{}
 				},
 				errs,

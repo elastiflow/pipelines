@@ -43,7 +43,7 @@ func TestBase_PushAddsToBatch(t *testing.T) {
 	out := make(pipes.Pipes[string], 1)
 	out.Initialize(1)
 
-	base := NewBase[string, string](ctx, out.Senders(), errs)
+	base := NewBase[string, string](ctx, out[0], errs)
 	base.Push("foo")
 
 	assert.Equal(t, 1, base.Batch.Len())
@@ -55,7 +55,7 @@ func TestBase_FlushSuccess(t *testing.T) {
 	out := make(pipes.Pipes[string], 1)
 	out.Initialize(1)
 
-	base := NewBase[string, string](ctx, out.Senders(), errs)
+	base := NewBase[string, string](ctx, out[0], errs)
 
 	// procFunc returns "ok"
 	proc := func(items []string) (string, error) {
@@ -80,7 +80,7 @@ func TestBase_FlushError(t *testing.T) {
 	out := make(pipes.Pipes[string], 1)
 	out.Initialize(1)
 
-	base := NewBase[string, string](ctx, out.Senders(), errs)
+	base := NewBase[string, string](ctx, out[0], errs)
 
 	proc := func(_ []string) (string, error) {
 		return "", errors.New("fail")

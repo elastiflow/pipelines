@@ -2,7 +2,6 @@ package partition
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sync"
 )
 
@@ -48,13 +47,13 @@ type Base[T any, R any] struct {
 	Ctx   context.Context
 	Batch *Batch[T]
 	Errs  chan<- error
-	out   pipes.Senders[R]
+	out   chan<- R
 }
 
 // NewBase constructs a new Base instance.
 func NewBase[T any, R any](
 	ctx context.Context,
-	out pipes.Senders[R],
+	out chan R,
 	errs chan<- error,
 ) *Base[T, R] {
 	return &Base[T, R]{
@@ -83,11 +82,9 @@ func (b *Base[T, R]) Flush(
 		return
 	}
 
-	for _, outChannel := range b.out {
-		select {
-		case <-ctx.Done():
-		default:
-			outChannel <- agg
-		}
+	select {
+	case <-ctx.Done():
+	default:
+		b.out <- agg
 	}
 }
