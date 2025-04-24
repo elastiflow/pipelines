@@ -108,6 +108,19 @@ func (p *Pipeline[T, U]) Map(
 	return datastreams.Map[T, U](p.sourceDS, mapper, params...)
 }
 
+// Expand creates a new DataStream by applying an expander function (ExpandFunc) to each
+// message in the pipeline's source. This is a convenience method that directly calls
+// datastreams.Expand on the pipeline's source.
+//
+//   - mapper: an Expand[T, U] that takes an input T and returns an array of output U
+//   - params: optional datastreams.Params to configure buffer sizes, skipping errors, etc.
+func (p *Pipeline[T, U]) Expand(
+	expander datastreams.ExpandFunc[T, U],
+	params ...datastreams.Params,
+) datastreams.DataStream[U] {
+	return datastreams.Expand[T, U](p.sourceDS, expander, params...)
+}
+
 // Stream applies a StreamFunc to the pipeline's source, storing the resulting
 // DataStream as the pipeline's sink (final stage). It then returns that sink
 // DataStream for further chaining.
