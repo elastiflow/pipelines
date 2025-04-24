@@ -167,7 +167,7 @@ func TestIntegrationPipeline_Expand(t *testing.T) {
 				pipeline = pipeline.Process(p)
 			}
 
-			// Map transform
+			// Expand inputs into multiple outputs
 			transformed := pipeline.Expand(tt.expandFunc)
 
 			// Post-processing on the DataStream

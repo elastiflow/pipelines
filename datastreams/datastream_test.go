@@ -764,7 +764,7 @@ func TestDataStream_Expand(t *testing.T) {
 		name             string
 		input            []int
 		processes        []ProcessFunc[int]
-		expander         ExpandFunc[int, string]
+		expandFunc       ExpandFunc[int, string]
 		postprocessor    []ProcessFunc[string]
 		expectedElements []string
 		expectedErr      string
@@ -777,7 +777,7 @@ func TestDataStream_Expand(t *testing.T) {
 					return v * 2, nil
 				},
 			},
-			expander: func(v int) ([]string, error) {
+			expandFunc: func(v int) ([]string, error) {
 				return []string{
 					fmt.Sprintf("dollars: %v", v),
 					fmt.Sprintf("pesos: %v", v*20),
@@ -795,7 +795,7 @@ func TestDataStream_Expand(t *testing.T) {
 		{
 			name:  "expand then post process the results",
 			input: []int{2, 3, 4},
-			expander: func(v int) ([]string, error) {
+			expandFunc: func(v int) ([]string, error) {
 				return []string{
 					fmt.Sprintf("dollars: %v", v),
 					fmt.Sprintf("pesos: %v", v*20),
@@ -818,7 +818,7 @@ func TestDataStream_Expand(t *testing.T) {
 		{
 			name:  "should transform one input into several different outputs",
 			input: []int{5},
-			expander: func(v int) ([]string, error) {
+			expandFunc: func(v int) ([]string, error) {
 				return []string{
 					fmt.Sprintf("value: %v", v),
 					fmt.Sprintf("multiplied: %v", v*2),
@@ -834,9 +834,9 @@ func TestDataStream_Expand(t *testing.T) {
 			},
 		},
 		{
-			name:  "should error when the expander returns an error",
+			name:  "should error when the expandFunc returns an error",
 			input: []int{5},
-			expander: func(v int) ([]string, error) {
+			expandFunc: func(v int) ([]string, error) {
 				return nil, fmt.Errorf("error while expanding")
 			},
 			expectedErr: "error while expanding",
@@ -865,7 +865,7 @@ func TestDataStream_Expand(t *testing.T) {
 				pipe = pipe.Run(process)
 			}
 
-			next_ := Expand(pipe, tt.expander)
+			next_ := Expand(pipe, tt.expandFunc)
 
 			for _, postprocessor := range tt.postprocessor {
 				next_ = next_.Run(postprocessor)
