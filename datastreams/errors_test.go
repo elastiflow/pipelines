@@ -41,6 +41,13 @@ func TestNewError(t *testing.T) {
 			msg:     "sink error",
 			want:    "datastream SINK error (code: 3 segment: segment4, message: sink error)",
 		},
+		{
+			name:    "should create an EXPAND error",
+			code:    EXPAND,
+			segment: "segment5",
+			msg:     "expand error",
+			want:    "datastream EXPAND error (code: 4 segment: segment5, message: expand error)",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -247,6 +254,32 @@ func TestIsSinkError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := IsSinkError(tt.err); got != tt.want {
 				t.Errorf("IsSinkError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsExpandError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "should return true for EXPAND error",
+			err:  newExpandError("segment", errors.New("error")),
+			want: true,
+		},
+		{
+			name: "should return false for non-EXPAND error",
+			err:  errors.New("some other error"),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsExpandError(tt.err); got != tt.want {
+				t.Errorf("IsExpandError() = %v, want %v", got, tt.want)
 			}
 		})
 	}

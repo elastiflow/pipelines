@@ -375,14 +375,14 @@ func Map[T any, U any](
 
 func Expand[T any, U any](
 	ds DataStream[T],
-	expandFunc TransformFunc[T, []U],
+	expandFunc ExpandFunc[T, U],
 	params ...Params,
 ) DataStream[U] {
 	param := applyParams(params...)
 	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
 	for i := 0; i < len(ds.inStreams); i++ {
 		ds.incrementWaitGroup(1)
-		go func(inStream <-chan T, outStream chan<- U, transformer TransformFunc[T, []U]) {
+		go func(inStream <-chan T, outStream chan<- U, expander ExpandFunc[T, U]) {
 			if ds.wg != nil {
 				defer ds.wg.Done()
 			}
@@ -395,14 +395,14 @@ func Expand[T any, U any](
 					if !ok {
 						return
 					}
-					val, err := transformer(v)
+					outputs, err := expander(v)
 					if err != nil {
-						ds.errStream <- newMapError(param.SegmentName, err)
+						ds.errStream <- newExpandError(param.SegmentName, err)
 						if param.SkipError {
 							continue
 						}
 					}
-					for _, val := range val {
+					for _, val := range outputs {
 						select {
 						case outStream <- val:
 						case <-ds.ctx.Done():
