@@ -95,6 +95,97 @@ func TestIntegrationPipeline_Map(t *testing.T) {
 	}
 }
 
+// TestIntegrationPipeline_Expand tests using Pipeline.Expand with optional pre/post processing.
+func TestIntegrationPipeline_Expand(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       []int
+		preprocess  []datastreams.ProcessFunc[int]
+		expandFunc  datastreams.ExpandFunc[int, string]
+		postprocess []datastreams.ProcessFunc[string]
+		wantStrings []string
+	}{
+		{
+			name:  "simple expansion",
+			input: []int{1, 2, 3},
+			expandFunc: func(p int) ([]string, error) {
+				return []string{
+					fmt.Sprintf("%d00", p),
+					fmt.Sprintf("%d01", p),
+					fmt.Sprintf("%d02", p),
+				}, nil
+			},
+			wantStrings: []string{"100", "101", "102", "200", "201", "202", "300", "301", "302"},
+		},
+		{
+			name:  "expansion with a preprocess",
+			input: []int{1, 2, 3},
+			preprocess: []datastreams.ProcessFunc[int]{func(p int) (int, error) {
+				return p * 2, nil
+			}},
+			expandFunc: func(p int) ([]string, error) {
+				return []string{
+					fmt.Sprintf("%d00", p),
+					fmt.Sprintf("%d01", p),
+					fmt.Sprintf("%d02", p),
+				}, nil
+			},
+			wantStrings: []string{"200", "201", "202", "400", "401", "402", "600", "601", "602"},
+		},
+		{
+			name:  "expansion with a preprocess and postprocess",
+			input: []int{1, 2, 3},
+			preprocess: []datastreams.ProcessFunc[int]{func(p int) (int, error) {
+				return p * 2, nil
+			}},
+			expandFunc: func(p int) ([]string, error) {
+				return []string{
+					fmt.Sprintf("%d01", p),
+					fmt.Sprintf("%d02", p),
+				}, nil
+			},
+			postprocess: []datastreams.ProcessFunc[string]{func(p string) (string, error) {
+				return "Coding " + p, nil
+			}},
+			wantStrings: []string{"Coding 201", "Coding 202", "Coding 401", "Coding 402", "Coding 601", "Coding 602"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			consumer := NewMockSource(tt.input)
+			errChan := make(chan error, len(tt.input))
+			defer close(errChan)
+			pipeline := New[int, string](
+				context.Background(),
+				consumer,
+				errChan,
+			)
+
+			// Apply any pre-processing steps
+			for _, p := range tt.preprocess {
+				pipeline = pipeline.Process(p)
+			}
+
+			// Map transform
+			transformed := pipeline.Expand(tt.expandFunc)
+
+			// Post-processing on the DataStream
+			for _, p := range tt.postprocess {
+				transformed = transformed.Run(p)
+			}
+
+			// Gather the results
+			var gotStrings []string
+			for v := range transformed.Out() {
+				gotStrings = append(gotStrings, v)
+			}
+
+			assert.ElementsMatch(t, tt.wantStrings, gotStrings)
+		})
+	}
+}
+
 // TestIntegrationPipeline_Out demonstrates usage of pipeline.Out to read processed data.
 func TestIntegrationPipeline_Out(t *testing.T) {
 	tests := []struct {
