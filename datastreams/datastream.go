@@ -402,9 +402,9 @@ func Expand[T any, U any](
 							continue
 						}
 					}
-					for _, val := range outputs {
+					for _, output := range outputs {
 						select {
-						case outStream <- val:
+						case outStream <- output:
 						case <-ds.ctx.Done():
 							return
 						}
