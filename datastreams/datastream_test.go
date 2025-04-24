@@ -759,6 +759,141 @@ func TestDataStream_Map(t *testing.T) {
 	}
 }
 
+func TestDataStream_Expand(t *testing.T) {
+	tests := []struct {
+		name             string
+		input            []int
+		processes        []ProcessFunc[int]
+		expander         ExpandFunc[int, string]
+		postprocessor    []ProcessFunc[string]
+		expectedElements []string
+		expectedErr      string
+	}{
+		{
+			name:  "process then expand the data into both dollars and pesos",
+			input: []int{0, 1, 2},
+			processes: []ProcessFunc[int]{
+				func(v int) (int, error) {
+					return v * 2, nil
+				},
+			},
+			expander: func(v int) ([]string, error) {
+				return []string{
+					fmt.Sprintf("dollars: %v", v),
+					fmt.Sprintf("pesos: %v", v*20),
+				}, nil
+			},
+			expectedElements: []string{
+				"dollars: 0",
+				"pesos: 0",
+				"dollars: 2",
+				"pesos: 40",
+				"dollars: 4",
+				"pesos: 80",
+			},
+		},
+		{
+			name:  "expand then post process the results",
+			input: []int{2, 3, 4},
+			expander: func(v int) ([]string, error) {
+				return []string{
+					fmt.Sprintf("dollars: %v", v),
+					fmt.Sprintf("pesos: %v", v*20),
+				}, nil
+			},
+			postprocessor: []ProcessFunc[string]{
+				func(v string) (string, error) {
+					return fmt.Sprintf("Post processed - %v", v), nil
+				},
+			},
+			expectedElements: []string{
+				"Post processed - dollars: 2",
+				"Post processed - pesos: 40",
+				"Post processed - dollars: 3",
+				"Post processed - pesos: 60",
+				"Post processed - dollars: 4",
+				"Post processed - pesos: 80",
+			},
+		},
+		{
+			name:  "should transform one input into several different outputs",
+			input: []int{5},
+			expander: func(v int) ([]string, error) {
+				return []string{
+					fmt.Sprintf("value: %v", v),
+					fmt.Sprintf("multiplied: %v", v*2),
+					fmt.Sprintf("multiplied by 3: %v", v*3),
+					fmt.Sprintf("modulo: %v", v%3),
+				}, nil
+			},
+			expectedElements: []string{
+				"value: 5",
+				"multiplied: 10",
+				"multiplied by 3: 15",
+				"modulo: 2",
+			},
+		},
+		{
+			name:  "should error when the expander returns an error",
+			input: []int{5},
+			expander: func(v int) ([]string, error) {
+				return nil, fmt.Errorf("error while expanding")
+			},
+			expectedErr: "error while expanding",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inputChan := make(chan int)
+			errChan := make(chan error, 1)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer func() {
+				close(errChan)
+				cancel()
+			}()
+
+			go func() {
+				for _, num := range tt.input {
+					inputChan <- num
+				}
+				close(inputChan)
+			}()
+
+			pipe := New[int](ctx, inputChan, errChan)
+			for _, process := range tt.processes {
+				pipe = pipe.Run(process)
+			}
+
+			next_ := Expand(pipe, tt.expander)
+
+			for _, postprocessor := range tt.postprocessor {
+				next_ = next_.Run(postprocessor)
+			}
+
+			var results []string
+			for out := range next_.OrDone().Out() {
+				results = append(results, out)
+			}
+
+			select {
+			case err := <-errChan:
+				if err != nil && tt.expectedErr == "" {
+					t.Errorf("unexpected error: %v", err)
+				} else {
+					assert.Contains(t, err.Error(), tt.expectedErr)
+				}
+			default:
+				if tt.expectedErr != "" {
+					t.Errorf("expected error but got none")
+				}
+			}
+
+			assert.ElementsMatch(t, tt.expectedElements, results)
+		})
+	}
+}
+
 func TestDataStream_Sink(t *testing.T) {
 	type testCase struct {
 		name              string
