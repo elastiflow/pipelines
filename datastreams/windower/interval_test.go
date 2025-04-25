@@ -9,23 +9,15 @@ import (
 )
 
 func TestTumblingTime_Publish(t *testing.T) {
-	// aggregatorFunc will transform incoming items []int into a single sum (int).
-	aggregatorFunc := func(items []int) (int, error) {
-		var sum int
-		for _, i := range items {
-			sum += i
-		}
-		return sum, nil
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	errs := make(chan error, 10)
-	out := make(pipes.Pipes[int], 1)
+	out := make(pipes.Pipes[[]int], 1)
 	out.Initialize(10)
 	defer out.Close()
 
-	w := newInterval[int, int](ctx, out[0], aggregatorFunc, errs, 200*time.Millisecond)
+	w := NewInterval[int](ctx, out.Senders(), errs, 200*time.Millisecond)
 	go func() {
 		for i := 1; i <= 10; i++ {
 			w.Push(i)
@@ -33,7 +25,7 @@ func TestTumblingTime_Publish(t *testing.T) {
 		}
 	}()
 
-	var results []int
+	var results [][]int
 	for {
 		select {
 		case v := <-out[0]:

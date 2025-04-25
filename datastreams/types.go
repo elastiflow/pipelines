@@ -12,3 +12,5 @@ type TransformFunc[T any, U any] func(T) (U, error)
 type FilterFunc[T any] func(T) (bool, error)
 
 type KeyFunc[T any, K comparable] func(T) K
+
+type WindowFunc[T any, R any] func([]T) (R, error)

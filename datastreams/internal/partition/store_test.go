@@ -8,10 +8,10 @@ import (
 
 // mockPartition is a test double for Partition[T, R]
 func TestStore_SetAndGet(t *testing.T) {
-	s := newStore[int, string, int]()
+	s := newStore[int, string]()
 
-	p1 := &mockPartition[int, string]{}
-	p2 := &mockPartition[int, string]{}
+	p1 := &mockPartition[int]{}
+	p2 := &mockPartition[int]{}
 
 	s.set("foo", p1)
 	s.set("bar", p2)
@@ -26,7 +26,7 @@ func TestStore_SetAndGet(t *testing.T) {
 }
 
 func TestStore_GetMissingKey(t *testing.T) {
-	s := newStore[int, string, string]()
+	s := newStore[int, string]()
 	_, ok := s.get("nonexistent")
 	assert.False(t, ok)
 }

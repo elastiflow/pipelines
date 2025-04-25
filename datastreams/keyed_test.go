@@ -144,8 +144,8 @@ func TestWindow(t *testing.T) {
 
 			out := Window[testStruct, int, testStruct](
 				kds,
-				windower.NewIntervalFactory(tt.process, 500*time.Millisecond), // process over 500ms
-				tt.keyResBy,
+				tt.process,
+				windower.NewIntervalFactory[testStruct](500*time.Millisecond), // process over 500ms
 				Params{
 					BufferSize: 50,
 				},
@@ -182,20 +182,21 @@ func BenchmarkWindowThroughput(b *testing.B) {
 				func(t testStruct) int { return t.ID % 2 },
 				Params{BufferSize: 50, Num: 1},
 			)
+			windowFunc := func(batch []testStruct) (testStruct, error) {
+				avgId := 0
+				for _, item := range batch {
+					avgId += item.ID
+				}
+				return testStruct{
+					ID:   avgId,
+					Name: "test",
+				}, nil
+			}
 
 			win := Window[testStruct, int, testStruct](
 				kds,
-				windower.NewIntervalFactory(func(batch []testStruct) (testStruct, error) {
-					avgId := 0
-					for _, item := range batch {
-						avgId += item.ID
-					}
-					return testStruct{
-						ID:   avgId,
-						Name: "test",
-					}, nil
-				}, 50*time.Millisecond),
-				func(t testStruct) int { return t.ID % 2 },
+				windowFunc,
+				windower.NewIntervalFactory[testStruct](50*time.Millisecond),
 				Params{BufferSize: 50},
 			)
 
@@ -235,14 +236,14 @@ func BenchmarkWindowDuration(b *testing.B) {
 				Params{BufferSize: 50, Num: 1},
 			)
 
+			widowFunc := func(batch []testStruct) (testStruct, error) {
+				return testStruct{}, nil
+			}
+
 			win := Window[testStruct, int, testStruct](
 				kds,
-				windower.NewIntervalFactory(
-					func(batch []testStruct) (testStruct, error) {
-						return testStruct{}, nil
-					}, dur,
-				),
-				func(t testStruct) int { return t.ID % 2 },
+				widowFunc,
+				windower.NewIntervalFactory[testStruct](dur),
 				Params{BufferSize: 50},
 			)
 
@@ -274,14 +275,14 @@ func BenchmarkWindowBufferSize(b *testing.B) {
 				Params{BufferSize: buf, Num: 1},
 			)
 
+			widowFunc := func(batch []testStruct) (testStruct, error) {
+				return testStruct{}, nil
+			}
+
 			win := Window[testStruct, int, testStruct](
 				kds,
-				windower.NewIntervalFactory(
-					func(batch []testStruct) (testStruct, error) {
-						return testStruct{}, nil
-					}, 50*time.Millisecond,
-				),
-				func(t testStruct) int { return t.ID % 2 },
+				widowFunc,
+				windower.NewIntervalFactory[testStruct](50*time.Millisecond),
 				Params{BufferSize: buf},
 			)
 
@@ -312,13 +313,11 @@ func BenchmarkWindowKeyCardinality(b *testing.B) {
 				func(t testStruct) int { return t.ID % K },
 				Params{BufferSize: 50, Num: 1},
 			)
+			winFunc := func(batch []testStruct) (testStruct, error) { return testStruct{}, nil }
 			win := Window[testStruct, int, testStruct](
 				kds,
-				windower.NewIntervalFactory(
-					func(batch []testStruct) (testStruct, error) { return testStruct{}, nil },
-					50*time.Millisecond,
-				),
-				func(t testStruct) int { return t.ID % K },
+				winFunc,
+				windower.NewIntervalFactory[testStruct](50*time.Millisecond),
 				Params{BufferSize: 50},
 			)
 			go drain(win.OrDone().Out())
@@ -372,8 +371,8 @@ func BenchmarkWindowAggregatorComplexity(b *testing.B) {
 			)
 			win := Window[testStruct, int, testStruct](
 				kds,
-				windower.NewIntervalFactory(agg, 50*time.Millisecond),
-				func(t testStruct) int { return t.ID % 2 },
+				agg,
+				windower.NewIntervalFactory[testStruct](50*time.Millisecond),
 				Params{BufferSize: 50},
 			)
 			go drain(win.OrDone().Out())
@@ -409,13 +408,13 @@ func BenchmarkWindowConcurrency(b *testing.B) {
 					func(t testStruct) int { return t.ID % M },
 					Params{BufferSize: 50, Num: M},
 				)
+				proc := func(batch []testStruct) (testStruct, error) { return testStruct{}, nil }
 				win := Window[testStruct, int, testStruct](
 					kds,
-					windower.NewIntervalFactory(
-						func(batch []testStruct) (testStruct, error) { return testStruct{}, nil },
+					proc,
+					windower.NewIntervalFactory[testStruct](
 						50*time.Millisecond,
 					),
-					func(t testStruct) int { return t.ID % M },
 					Params{BufferSize: 50},
 				)
 				go drain(win.OrDone().Out())
@@ -464,8 +463,8 @@ func BenchmarkWindowErrorPath(b *testing.B) {
 	)
 	win := Window[testStruct, int, testStruct](
 		kds,
-		windower.NewIntervalFactory(agg, 50*time.Millisecond),
-		func(t testStruct) int { return t.ID % 2 },
+		agg,
+		windower.NewIntervalFactory[testStruct](50*time.Millisecond),
 		Params{BufferSize: 50},
 	)
 	go drain(win.OrDone().Out())

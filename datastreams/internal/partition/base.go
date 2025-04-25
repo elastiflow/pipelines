@@ -2,6 +2,7 @@ package partition
 
 import (
 	"context"
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sync"
 )
 
@@ -43,20 +44,20 @@ func (s *Batch[T]) Len() int {
 
 // Base provides a shared Publish method to send aggregated results
 // into the output channels.
-type Base[T any, R any] struct {
+type Base[T any] struct {
 	Ctx   context.Context
 	Batch *Batch[T]
 	Errs  chan<- error
-	out   chan<- R
+	out   pipes.Senders[[]T]
 }
 
 // NewBase constructs a new Base instance.
-func NewBase[T any, R any](
+func NewBase[T any](
 	ctx context.Context,
-	out chan R,
+	out pipes.Senders[[]T],
 	errs chan<- error,
-) *Base[T, R] {
-	return &Base[T, R]{
+) *Base[T] {
+	return &Base[T]{
 		Ctx:   ctx,
 		Batch: NewBatch[T](),
 		Errs:  errs,
@@ -66,25 +67,16 @@ func NewBase[T any, R any](
 
 // Push adds an item to the in-memory buffer.
 // The separate ticker goroutine will publish periodically.
-func (b *Base[T, R]) Push(item T) {
+func (b *Base[T]) Push(item T) {
 	b.Batch.Push(item)
 }
 
-func (b *Base[T, R]) Flush(
-	ctx context.Context,
-	next []T,
-	procFunc func([]T) (R, error),
-	errs chan<- error,
-) {
-	agg, err := procFunc(next)
-	if err != nil {
-		errs <- err
-		return
-	}
-
-	select {
-	case <-ctx.Done():
-	default:
-		b.out <- agg
+func (b *Base[T]) Flush(ctx context.Context, next []T) {
+	for _, out := range b.out {
+		select {
+		case <-ctx.Done():
+			return
+		case out <- next:
+		}
 	}
 }

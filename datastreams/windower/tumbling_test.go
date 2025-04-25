@@ -11,24 +11,16 @@ import (
 )
 
 func TestTumblingWindow_Publish(t *testing.T) {
-	aggregatorFunc := func(items []int) (int, error) {
-		sum := 0
-		for _, i := range items {
-			sum += i
-		}
-		return sum, nil
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	errs := make(chan error, 10)
-	out := make(pipes.Pipes[int], 1)
+	out := make(pipes.Pipes[[]int], 1)
 	out.Initialize(10)
 	defer out.Close()
 
 	// windowDuration = 200ms
-	w := newTumbling[int, int](ctx, out[0], aggregatorFunc, errs, 200*time.Millisecond)
+	w := newTumbling[int](ctx, out.Senders(), errs, 200*time.Millisecond)
 
 	// push 8 items, one every 50ms → exactly two windows of 4 items each
 	go func() {
@@ -38,7 +30,7 @@ func TestTumblingWindow_Publish(t *testing.T) {
 		}
 	}()
 
-	var results []int
+	var results [][]int
 	for {
 		select {
 		case v := <-out[0]:
@@ -54,16 +46,15 @@ func TestTumblingWindow_Publish(t *testing.T) {
 func TestTumblingWindow_ProcError(t *testing.T) {
 	// procFunc always errors
 	wantErr := errors.New("bad")
-	proc := func([]int) (int, error) { return 0, wantErr }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	errs := make(chan error, 10)
-	out := make(pipes.Pipes[int], 1)
+	out := make(pipes.Pipes[[]int], 1)
 	out.Initialize(10)
 
-	w := newTumbling[int, int](ctx, out[0], proc, errs, 200*time.Millisecond)
+	w := newTumbling[int, int](ctx, out.Senders(), errs, 200*time.Millisecond)
 	// push 8 items, one every 50ms → exactly two windows of 4 items each
 	go func() {
 		defer out.Close()
@@ -73,7 +64,7 @@ func TestTumblingWindow_ProcError(t *testing.T) {
 		}
 	}()
 
-	var results []int
+	var results [][]int
 	for v := range out[0] {
 		results = append(results, v)
 	}
@@ -84,21 +75,14 @@ func TestTumblingWindow_ProcError(t *testing.T) {
 }
 
 func BenchmarkTumblingWindow(b *testing.B) {
-	// aggregator sums the window slice
-	aggregator := func(items []int) (int, error) {
-		sum := 0
-		for _, x := range items {
-			sum += x
-		}
-		return sum, nil
-	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	errs := make(chan error, 10)
-	out := make(pipes.Pipes[int], 1)
+	out := make(pipes.Pipes[[]int], 1)
 	out.Initialize(10)
 
-	w := newTumbling[int, int](ctx, out[0], aggregator, errs, 200*time.Millisecond)
+	w := newTumbling[int, int](ctx, out.Senders(), errs, 200*time.Millisecond)
 
 	go func() {
 		for {

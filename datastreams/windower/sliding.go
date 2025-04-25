@@ -2,6 +2,7 @@ package windower
 
 import (
 	"context"
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sync"
 	"time"
 
@@ -16,25 +17,23 @@ type record[T any] struct {
 
 // sliding emits overlapping windows of size windowDuration,
 // every slideInterval apart.
-type sliding[T any, R any] struct {
-	*partition.Base[T, R]
+type sliding[T any] struct {
+	*partition.Base[T]
 
 	windowDuration time.Duration
 	slideInterval  time.Duration
-	procFunc       func([]T) (R, error)
 
 	mu     sync.Mutex
 	buffer []record[T]
 }
 
 // newSliding constructs a sliding window partition that starts ticking immediately.
-func newSliding[T any, R any](
+func newSliding[T any](
 	ctx context.Context,
-	out chan R,
-	procFunc func([]T) (R, error),
+	out pipes.Senders[[]T],
 	errs chan<- error,
 	windowDuration, slideInterval time.Duration,
-) partition.Partition[T, R] {
+) partition.Partition[T] {
 	if windowDuration <= 0 || slideInterval <= 0 {
 		panic("windowDuration and slideInterval must be > 0")
 	}
@@ -42,25 +41,24 @@ func newSliding[T any, R any](
 		panic("slideInterval cannot be larger than windowDuration")
 	}
 
-	s := &sliding[T, R]{
-		Base:           partition.NewBase[T, R](ctx, out, errs),
+	s := &sliding[T]{
+		Base:           partition.NewBase[T](ctx, out, errs),
 		windowDuration: windowDuration,
 		slideInterval:  slideInterval,
-		procFunc:       procFunc,
 	}
 	go s.run()
 	return s
 }
 
 // Push appends the item with its arrival timestamp.
-func (s *sliding[T, R]) Push(item T) {
+func (s *sliding[T]) Push(item T) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.buffer = append(s.buffer, record[T]{val: item, ts: time.Now()})
 }
 
 // run drives the periodic flushes.
-func (s *sliding[T, R]) run() {
+func (s *sliding[T]) run() {
 	ticker := time.NewTicker(s.slideInterval)
 	defer ticker.Stop()
 
@@ -78,7 +76,7 @@ func (s *sliding[T, R]) run() {
 }
 
 // flush evicts old records and publishes the current window.
-func (s *sliding[T, R]) flush(now time.Time, final bool) {
+func (s *sliding[T]) flush(now time.Time, final bool) {
 	threshold := now.Add(-s.windowDuration)
 
 	s.mu.Lock()
@@ -111,19 +109,18 @@ func (s *sliding[T, R]) flush(now time.Time, final bool) {
 	s.mu.Unlock()
 
 	// publish
-	s.Flush(s.Ctx, window, s.procFunc, s.Errs)
+	s.Flush(s.Ctx, window)
 }
 
 // NewSlidingFactory constructs a sliding window factory.
-func NewSlidingFactory[T any, R any](
-	procFunc func([]T) (R, error),
+func NewSlidingFactory[T any](
 	windowDuration, slideInterval time.Duration,
-) partition.Factory[T, R] {
+) partition.Factory[T] {
 	return func(
 		ctx context.Context,
-		out chan R,
+		out pipes.Senders[[]T],
 		errs chan<- error,
-	) partition.Partition[T, R] {
-		return newSliding(ctx, out, procFunc, errs, windowDuration, slideInterval)
+	) partition.Partition[T] {
+		return newSliding(ctx, out, errs, windowDuration, slideInterval)
 	}
 }

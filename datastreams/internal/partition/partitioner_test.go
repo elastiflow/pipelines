@@ -11,19 +11,19 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type mockPartition[T any, R any] struct {
+type mockPartition[T any] struct {
 	mu     sync.Mutex
 	items  []T
 	closed bool
 }
 
-func (m *mockPartition[T, R]) Push(item T) {
+func (m *mockPartition[T]) Push(item T) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.items = append(m.items, item)
 }
 
-func (m *mockPartition[T, R]) Close() {
+func (m *mockPartition[T]) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closed = true
@@ -57,8 +57,7 @@ func TestPartitioner_Partition(t *testing.T) {
 		values []int
 	}
 
-	errs := make(chan error, 10)
-	output := make(pipes.Pipes[string], 1)
+	output := make(pipes.Pipes[[]int], 1)
 	output.Initialize(10)
 
 	tm := &mockTimeMarker{}
@@ -110,12 +109,12 @@ func TestPartitioner_Partition(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// fresh store each test
-			mgr := NewPartitioner[int, string, string](
+			mgr := NewPartitioner[int, string](
 				context.Background(),
-				func(ctx context.Context, out chan string, errs chan<- error) Partition[int, string] {
-					return &mockPartition[int, string]{}
+				output.Senders(),
+				func(ctx context.Context, out pipes.Senders[[]int], errs chan<- error) Partition[int] {
+					return &mockPartition[int]{}
 				},
-				errs,
 				func() TimeMarker {
 					if tt.timeMarker != nil {
 						return tt.timeMarker
