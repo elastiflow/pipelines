@@ -1,3 +1,5 @@
+# Reusable Go Checks Workflow with Semgrep-safe shell usage
+
 on:
   workflow_call:
     inputs:
@@ -62,11 +64,12 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure Git with goprivate
         if: ${{ inputs.configure_git_goprivate }}
+        env:
+          GDF_TOKEN: ${{ secrets.go_dependency_fetcher_token }}
+          GOPRIVATE: ${{ inputs.goprivate }}
         run: |
-          git config \
-            --global url."https://${{ secrets.go_dependency_fetcher_token }}@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
-          git config \
-            --global url."https://${{ secrets.go_dependency_fetcher_token }}@${{ inputs.goprivate }}".insteadOf "https://${{ inputs.goprivate }}"
+          git config --global url."https://$GDF_TOKEN@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
+          git config --global url."https://$GDF_TOKEN@$GOPRIVATE".insteadOf "https://$GOPRIVATE"
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -74,10 +77,10 @@ jobs:
       - name: Run Tidy
         run: |
           find . -type f -name 'go.mod' | while read -r svc; do
-            cd $(dirname "${svc}");
-            echo "In $(pwd)";
-            go mod tidy;
-            cd -;
+            cd "$(dirname "$svc")"
+            echo "In $(pwd)"
+            go mod tidy
+            cd -
           done
           git diff --exit-code
   goimports:
@@ -89,11 +92,12 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure Git with goprivate
         if: ${{ inputs.configure_git_goprivate }}
+        env:
+          GDF_TOKEN: ${{ secrets.go_dependency_fetcher_token }}
+          GOPRIVATE: ${{ inputs.goprivate }}
         run: |
-          git config \
-            --global url."https://${{ secrets.go_dependency_fetcher_token }}@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
-          git config \
-            --global url."https://${{ secrets.go_dependency_fetcher_token }}@${{ inputs.goprivate }}".insteadOf "https://${{ inputs.goprivate }}"
+          git config --global url."https://$GDF_TOKEN@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
+          git config --global url."https://$GDF_TOKEN@$GOPRIVATE".insteadOf "https://$GOPRIVATE"
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -112,11 +116,12 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure Git with goprivate
         if: ${{ inputs.configure_git_goprivate }}
+        env:
+          GDF_TOKEN: ${{ secrets.go_dependency_fetcher_token }}
+          GOPRIVATE: ${{ inputs.goprivate }}
         run: |
-          git config \
-            --global url."https://${{ secrets.go_dependency_fetcher_token }}@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
-          git config \
-            --global url."https://${{ secrets.go_dependency_fetcher_token }}@${{ inputs.goprivate }}".insteadOf "https://${{ inputs.goprivate }}"
+          git config --global url."https://$GDF_TOKEN@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
+          git config --global url."https://$GDF_TOKEN@$GOPRIVATE".insteadOf "https://$GOPRIVATE"
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -125,10 +130,10 @@ jobs:
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@latest
           find . -type f -name 'go.mod' | while read -r svc; do
-            cd $(dirname "${svc}");
-            echo "In $(pwd)";
-            staticcheck ./...;
-            cd -;
+            cd "$(dirname "$svc")"
+            echo "In $(pwd)"
+            staticcheck ./...
+            cd -
           done
   gosec:
     name: 'gosec'
@@ -159,40 +164,46 @@ jobs:
     container:
       image: returntocorp/semgrep
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: semgrep scan
-        run: ${{ inputs.semgrep_cmd }}
+        env:
+          SEMGREP_CMD: ${{ inputs.semgrep_cmd }}
+        run: "$SEMGREP_CMD"
+
   unit_test:
-    name: 'unit test'
+    name: unit test
     runs-on: ${{ inputs.unit_test_runs-on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Configure Git with goprivate
         if: ${{ inputs.configure_git_goprivate }}
+        env:
+          GIT_SSH_KEY: ${{ secrets.git_ssh_key }}
+          GDF_TOKEN: ${{ secrets.go_dependency_fetcher_token }}
+          GOPRIVATE: ${{ inputs.goprivate }}
         run: |
-          if [ -n "${{ secrets.git_ssh_key }}" ]; then
+          if [ -n "$GIT_SSH_KEY" ]; then
             mkdir -p ~/.ssh
-            echo "${{ secrets.git_ssh_key }}" > ~/.ssh/id_rsa && chmod 0600 ~/.ssh/id_rsa
+            echo "$GIT_SSH_KEY" > ~/.ssh/id_rsa && chmod 0600 ~/.ssh/id_rsa
           else
             echo "No git_ssh_key secret set."
           fi
-          git config \
-            --global url."https://${{ secrets.go_dependency_fetcher_token }}@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
-          git config \
-            --global url."https://${{ secrets.go_dependency_fetcher_token }}@${{ inputs.goprivate }}".insteadOf "https://${{ inputs.goprivate }}"
-      - name: Setup Go
-        uses: actions/setup-go@v5
+          git config --global url."https://$GDF_TOKEN@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
+          git config --global url."https://$GDF_TOKEN@$GOPRIVATE".insteadOf "https://$GOPRIVATE"
+      - uses: actions/setup-go@v5
         with:
           go-version-file: ${{ inputs.go_version_file }}
       - name: Run tests
-        run: ${{ inputs.unit_test_cmd }}
+        env:
+          UNIT_TEST_CMD: ${{ inputs.unit_test_cmd }}
+        run: "$UNIT_TEST_CMD"
       - name: Report coverage
         if: always()
+        env:
+          REPORT_COVERAGE_CMD: ${{ inputs.unit_test_report_coverage_cmd }}
         run: |
-          echo "Coverage:" >> ${GITHUB_STEP_SUMMARY}
-          echo '```' >> ${GITHUB_STEP_SUMMARY}
-          ${{ inputs.unit_test_report_coverage_cmd }} >> ${GITHUB_STEP_SUMMARY}
-          echo '```' >> ${GITHUB_STEP_SUMMARY}
+          echo "Coverage:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          "$REPORT_COVERAGE_CMD" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
