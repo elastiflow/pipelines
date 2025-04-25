@@ -4,8 +4,6 @@ concurrency:
   cancel-in-progress: true
 on:
   pull_request:
-    branches:
-      - main
   push:
     branches:
       - main
@@ -13,9 +11,11 @@ on:
 jobs:
   go_checks:
     name: Go checks
-    uses: elastiflow/gha-reusable-workflows/.github/workflows/reusable_go_checks.yml@v0
+    uses: ./.github/workflows/reusable_go_checks.yml
     with:
-      sonarcloud_run: true
-      sonarcloud_project_key: "elastiflow_pipelines"
+      configure_git_goprivate: false
+      unit_test_cmd: make test-unit
+      unit_test_report_coverage_cmd: make test-unit-enforce-coverage
+      go_version_file: "go.mod"
     secrets:
-      sonarcloud_token: ${{ secrets.SONAR_TOKEN }}
+      go_dependency_fetcher_token: ${{ secrets.GO_DEPENDENCY_FETCH_TOKEN }}

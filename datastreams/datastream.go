@@ -206,6 +206,11 @@ func (p DataStream[T]) FanOut(
 func (p DataStream[T]) FanIn(
 	params ...Params,
 ) DataStream[T] {
+	// If there's only one input stream, then no need to fan in
+	if len(p.inStreams) == 1 {
+		return p
+	}
+
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(fanIn, param)
 	outSenders := outChannels.Senders()
