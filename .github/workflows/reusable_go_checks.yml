@@ -25,26 +25,14 @@ on:
         type: string
         default: "make report-coverage"
         description: "Command to report the unit tests coverage"
-      unit_test_runs-on:
-        type: string
-        default: ubuntu-latest
-        description: "GHA runner for the Unit Test job (ubuntu-latest, ubuntu-latest-4c, ubuntu-latest-8c)"
-      integration_test_enabled:
-        type: boolean
-        default: false
-        description: "Golang integration test command to run"
-      integration_test_cmd:
-        type: string
-        default: "make test-integration"
-        description: "Golang integration test command to run"
-      integration_test_runs-on:
-        type: string
-        default: ubuntu-latest
-        description: "GHA runner for the Integration Test job (ubuntu-latest, ubuntu-latest-4c, ubuntu-latest-8c)"
       runs-on:
         type: string
         default: ubuntu-latest
         description: "GHA runner for the job (ubuntu-latest, ubuntu-latest-4c, ubuntu-latest-8c)"
+      unit_test_runs-on:
+        type: string
+        default: ubuntu-latest
+        description: "GHA runner for the Unit Test job (ubuntu-latest, ubuntu-latest-4c, ubuntu-latest-8c)"
       timeout-minutes:
         type: number
         default: 10
@@ -53,18 +41,6 @@ on:
         type: string
         default: 'go.mod'
         description: "Go version file to use"
-      sonarcloud_run:
-        type: boolean
-        default: false
-        description: "If true, run a SonarCloud scan after unit tests complete"
-      sonarcloud_project_key:
-        type: string
-        default: ""
-        description: "SonarCloud project key"
-      sonarcloud_org:
-        type: string
-        default: "elastiflow"
-        description: "SonarCloud organization"
     secrets:
       go_dependency_fetcher_token:
         required: false
@@ -72,9 +48,6 @@ on:
       git_ssh_key:
         required: false
         description: "Git ssh key with access to ElastiFlow repositories"
-      sonarcloud_token:
-        required: false
-        description: "SonarCloud token (required if sonarcloud_run is true)"
 
 env:
   GOPRIVATE: ${{ inputs.goprivate }}
@@ -197,8 +170,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: Configure Git with goprivate
         if: ${{ inputs.configure_git_goprivate }}
         run: |
@@ -225,42 +196,3 @@ jobs:
           echo '```' >> ${GITHUB_STEP_SUMMARY}
           ${{ inputs.unit_test_report_coverage_cmd }} >> ${GITHUB_STEP_SUMMARY}
           echo '```' >> ${GITHUB_STEP_SUMMARY}
-      - name: SonarCloud Scan
-        if: ${{ inputs.sonarcloud_run }}
-        uses: SonarSource/sonarqube-scan-action@v5
-        with:
-          args: >
-            -Dsonar.projectKey=${{ inputs.sonarcloud_project_key }}
-            -Dsonar.organization=${{ inputs.sonarcloud_org }}
-            -Dsonar.go.coverage.reportPaths=coverage.out
-        env:
-          SONAR_TOKEN: ${{ secrets.sonarcloud_token }}
-  integration_test:
-    name: 'integration test'
-    if: ${{ inputs.integration_test_enabled }}
-    runs-on: ${{ inputs.integration_test_runs-on }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Configure Git with goprivate
-        if: ${{ inputs.configure_git_goprivate }}
-        run: |
-          if [ -n "${{ secrets.git_ssh_key }}" ]; then
-            mkdir -p ~/.ssh
-            echo "${{ secrets.git_ssh_key }}" > ~/.ssh/id_rsa && chmod 0600 ~/.ssh/id_rsa
-          else
-            echo "No git_ssh_key secret set."
-          fi
-          git config \
-            --global url."https://${{ secrets.go_dependency_fetcher_token }}@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
-          git config \
-            --global url."https://${{ secrets.go_dependency_fetcher_token }}@${{ inputs.goprivate }}".insteadOf "https://${{ inputs.goprivate }}"
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: ${{ inputs.go_version_file }}
-      - name: Run tests
-        run: ${{ inputs.integration_test_cmd }}
