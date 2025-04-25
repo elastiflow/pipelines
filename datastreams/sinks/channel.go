@@ -25,11 +25,12 @@ func ToChannel[T any](sender chan<- T, params ...Params) datastreams.Sinker[T] {
 
 // Sink reads the payload from the input datastreams.DataStream and sends it to the output channel
 func (p *channelSink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+	outStream := ds.Out()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case v, ok := <-ds.Out():
+		case v, ok := <-outStream:
 			if !ok {
 				return nil
 			}
