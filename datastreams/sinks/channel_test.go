@@ -91,10 +91,11 @@ func TestChannelSink_Sink(t *testing.T) {
 
 func TestDataStream_Sink(t *testing.T) {
 	type testCase[T any] struct {
-		name   string
-		input  []T
-		params Params
-		want   []T
+		name            string
+		input           []T
+		params          Params
+		buildDataStream func(ctx context.Context, inChan chan int, errChan chan error) datastreams.DataStream[T]
+		want            []T
 	}
 
 	tests := []testCase[int]{
@@ -102,7 +103,19 @@ func TestDataStream_Sink(t *testing.T) {
 			name:   "sink with valid data",
 			input:  []int{1, 2, 3, 4, 5},
 			params: Params{BufferSize: 128},
-			want:   []int{1, 2, 3, 4, 5},
+			buildDataStream: func(ctx context.Context, inChan chan int, errChan chan error) datastreams.DataStream[int] {
+				return datastreams.New(ctx, inChan, errChan)
+			},
+			want: []int{1, 2, 3, 4, 5},
+		},
+		{
+			name:   "sink a fanned out data stream with valid data",
+			input:  []int{1, 2, 3, 4, 5},
+			params: Params{BufferSize: 128},
+			buildDataStream: func(ctx context.Context, inChan chan int, errChan chan error) datastreams.DataStream[int] {
+				return datastreams.New(ctx, inChan, errChan).FanOut(datastreams.Params{Num: 2})
+			},
+			want: []int{1, 2, 3, 4, 5},
 		},
 	}
 
@@ -113,7 +126,7 @@ func TestDataStream_Sink(t *testing.T) {
 
 			inChan := make(chan int, len(tt.input))
 			errChan := make(chan error, 128)
-			sourceDS := datastreams.New(ctx, inChan, errChan)
+			sourceDS := tt.buildDataStream(ctx, inChan, errChan)
 			outChan := make(chan int, len(tt.input))
 			sink := ToChannel(outChan, tt.params)
 			sourceDS.Sink(sink)
