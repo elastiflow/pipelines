@@ -1,30 +1,16 @@
-GO_TEST_COVERAGE_PROFILE=coverage.out
-GO_TEST_COVERAGE_THRESHOLD=43
+APP?=""
+GIT_REPO_NAME=$(shell basename $$(git rev-parse --show-toplevel))
+include mk/*.mk
 
-.PHONY: test
-test:
-	GO_TEST_COVERAGE_THRESHOLD=${GO_TEST_COVERAGE_THRESHOLD} \
-	go test ${GO_TEST_OPTS} -coverprofile=${GO_TEST_COVERAGE_PROFILE} $$(go list ./... | grep -v examples)
+.PHONY: clean
+clean:
+	@echo "Running staticcheck..."
+	rm -rf ${GO_TEST_COVERAGE_DIR}
+	find ./ -type f -name 'coverage.out' -prune -exec rm -rf {} \;
 
-.PHONY: test-verbose
-test-verbose: GO_TEST_OPTS="-v"
-test-verbose: test
-
-.PHONY: report-coverage
-report-coverage:
-	make test
-	@go tool cover -func=${GO_TEST_COVERAGE_PROFILE} | grep total
-
-.PHONY: coverage-func
-coverage-func:
-	make test
-	go tool cover -func=coverage.out
-
-.PHONY: coverage-html
-coverage-html:
-	make test
-	go tool cover  -html=coverage.out
-
+############################################
+# All custom targets goes after this line
+############################################
 .PHONY: scan\:sbom
 scan\:sbom:
 	trivy fs --format cyclonedx .
@@ -44,7 +30,3 @@ scan\:license:
 .PHONY: docs
 docs:
 	godoc -http=:6060
-
-.PHONY: lint
-lint:
-	staticcheck ./...
