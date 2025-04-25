@@ -1,0 +1,266 @@
+on:
+  workflow_call:
+    inputs:
+      configure_git_goprivate:
+        type: boolean
+        default: false
+        description: "Configure git with a github token to fetch private deps. `go_dependency_fetcher_token` is required if true"
+      goprivate:
+        type: string
+        default: "github.com/elastiflow/"
+        description: "GOPRIVATE value"
+      gosec_args:
+        type: string
+        default: "-severity high -exclude-dir examples -exclude=G115 ./..."
+        description: "gosec tool command line arguments"
+      semgrep_cmd:
+        type: string
+        default: "semgrep scan --config auto --error"
+        description: "Semgrep command to run"
+      unit_test_cmd:
+        type: string
+        default: "make test"
+        description: "Golang unit test command to run"
+      unit_test_report_coverage_cmd:
+        type: string
+        default: "make report-coverage"
+        description: "Command to report the unit tests coverage"
+      unit_test_runs-on:
+        type: string
+        default: ubuntu-latest
+        description: "GHA runner for the Unit Test job (ubuntu-latest, ubuntu-latest-4c, ubuntu-latest-8c)"
+      integration_test_enabled:
+        type: boolean
+        default: false
+        description: "Golang integration test command to run"
+      integration_test_cmd:
+        type: string
+        default: "make test-integration"
+        description: "Golang integration test command to run"
+      integration_test_runs-on:
+        type: string
+        default: ubuntu-latest
+        description: "GHA runner for the Integration Test job (ubuntu-latest, ubuntu-latest-4c, ubuntu-latest-8c)"
+      runs-on:
+        type: string
+        default: ubuntu-latest
+        description: "GHA runner for the job (ubuntu-latest, ubuntu-latest-4c, ubuntu-latest-8c)"
+      timeout-minutes:
+        type: number
+        default: 10
+        description: "Job timeout in minutes"
+      go_version_file:
+        type: string
+        default: 'go.mod'
+        description: "Go version file to use"
+      sonarcloud_run:
+        type: boolean
+        default: false
+        description: "If true, run a SonarCloud scan after unit tests complete"
+      sonarcloud_project_key:
+        type: string
+        default: ""
+        description: "SonarCloud project key"
+      sonarcloud_org:
+        type: string
+        default: "elastiflow"
+        description: "SonarCloud organization"
+    secrets:
+      go_dependency_fetcher_token:
+        required: false
+        description: "GitHub token with read access to the Golang dependency repositories"
+      git_ssh_key:
+        required: false
+        description: "Git ssh key with access to ElastiFlow repositories"
+      sonarcloud_token:
+        required: false
+        description: "SonarCloud token (required if sonarcloud_run is true)"
+
+env:
+  GOPRIVATE: ${{ inputs.goprivate }}
+
+jobs:
+  go-mod-tidy:
+    name: 'go-mod-tidy'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure Git with goprivate
+        if: ${{ inputs.configure_git_goprivate }}
+        run: |
+          git config \
+            --global url."https://${{ secrets.go_dependency_fetcher_token }}@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
+          git config \
+            --global url."https://${{ secrets.go_dependency_fetcher_token }}@${{ inputs.goprivate }}".insteadOf "https://${{ inputs.goprivate }}"
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go_version_file }}
+      - name: Run Tidy
+        run: |
+          find . -type f -name 'go.mod' | while read -r svc; do
+            cd $(dirname "${svc}");
+            echo "In $(pwd)";
+            go mod tidy;
+            cd -;
+          done
+          git diff --exit-code
+  goimports:
+    name: 'goimports'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure Git with goprivate
+        if: ${{ inputs.configure_git_goprivate }}
+        run: |
+          git config \
+            --global url."https://${{ secrets.go_dependency_fetcher_token }}@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
+          git config \
+            --global url."https://${{ secrets.go_dependency_fetcher_token }}@${{ inputs.goprivate }}".insteadOf "https://${{ inputs.goprivate }}"
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go_version_file }}
+      - name: Run goimports
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          goimports -l -w ./
+          git diff --exit-code
+  staticcheck:
+    name: 'staticcheck'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure Git with goprivate
+        if: ${{ inputs.configure_git_goprivate }}
+        run: |
+          git config \
+            --global url."https://${{ secrets.go_dependency_fetcher_token }}@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
+          git config \
+            --global url."https://${{ secrets.go_dependency_fetcher_token }}@${{ inputs.goprivate }}".insteadOf "https://${{ inputs.goprivate }}"
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go_version_file }}
+      - name: Run Staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          find . -type f -name 'go.mod' | while read -r svc; do
+            cd $(dirname "${svc}");
+            echo "In $(pwd)";
+            staticcheck ./...;
+            cd -;
+          done
+  gosec:
+    name: 'gosec'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go_version_file }}
+      - name: Security Scan with private
+        if: ${{ inputs.configure_git_goprivate }}
+        uses: securego/gosec@v2.21.4
+        with:
+          args: ${{ inputs.gosec_args }}
+        env:
+          GITHUB_AUTHENTICATION_TOKEN: ${{ secrets.go_dependency_fetcher_token }}
+      - name: Security Scan
+        uses: securego/gosec@v2.21.4
+        with:
+          args: ${{ inputs.gosec_args }}
+  semgrep:
+    name: 'semgrep scan'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    container:
+      image: returntocorp/semgrep
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: semgrep scan
+        run: ${{ inputs.semgrep_cmd }}
+  unit_test:
+    name: 'unit test'
+    runs-on: ${{ inputs.unit_test_runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Configure Git with goprivate
+        if: ${{ inputs.configure_git_goprivate }}
+        run: |
+          if [ -n "${{ secrets.git_ssh_key }}" ]; then
+            mkdir -p ~/.ssh
+            echo "${{ secrets.git_ssh_key }}" > ~/.ssh/id_rsa && chmod 0600 ~/.ssh/id_rsa
+          else
+            echo "No git_ssh_key secret set."
+          fi
+          git config \
+            --global url."https://${{ secrets.go_dependency_fetcher_token }}@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
+          git config \
+            --global url."https://${{ secrets.go_dependency_fetcher_token }}@${{ inputs.goprivate }}".insteadOf "https://${{ inputs.goprivate }}"
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go_version_file }}
+      - name: Run tests
+        run: ${{ inputs.unit_test_cmd }}
+      - name: Report coverage
+        if: always()
+        run: |
+          echo "Coverage:" >> ${GITHUB_STEP_SUMMARY}
+          echo '```' >> ${GITHUB_STEP_SUMMARY}
+          ${{ inputs.unit_test_report_coverage_cmd }} >> ${GITHUB_STEP_SUMMARY}
+          echo '```' >> ${GITHUB_STEP_SUMMARY}
+      - name: SonarCloud Scan
+        if: ${{ inputs.sonarcloud_run }}
+        uses: SonarSource/sonarqube-scan-action@v5
+        with:
+          args: >
+            -Dsonar.projectKey=${{ inputs.sonarcloud_project_key }}
+            -Dsonar.organization=${{ inputs.sonarcloud_org }}
+            -Dsonar.go.coverage.reportPaths=coverage.out
+        env:
+          SONAR_TOKEN: ${{ secrets.sonarcloud_token }}
+  integration_test:
+    name: 'integration test'
+    if: ${{ inputs.integration_test_enabled }}
+    runs-on: ${{ inputs.integration_test_runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Configure Git with goprivate
+        if: ${{ inputs.configure_git_goprivate }}
+        run: |
+          if [ -n "${{ secrets.git_ssh_key }}" ]; then
+            mkdir -p ~/.ssh
+            echo "${{ secrets.git_ssh_key }}" > ~/.ssh/id_rsa && chmod 0600 ~/.ssh/id_rsa
+          else
+            echo "No git_ssh_key secret set."
+          fi
+          git config \
+            --global url."https://${{ secrets.go_dependency_fetcher_token }}@github.com/elastiflow/collectors".insteadOf "https://github.com/elastiflow/flowcoll"
+          git config \
+            --global url."https://${{ secrets.go_dependency_fetcher_token }}@${{ inputs.goprivate }}".insteadOf "https://${{ inputs.goprivate }}"
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go_version_file }}
+      - name: Run tests
+        run: ${{ inputs.integration_test_cmd }}
