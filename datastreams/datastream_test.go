@@ -894,6 +894,121 @@ func TestDataStream_Expand(t *testing.T) {
 	}
 }
 
+func TestDataStream_Batch(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           [][]int
+		preprocessor    ProcessFunc[[]int]
+		batchFunc       ReduceFunc[int, int]
+		postprocessor   ProcessFunc[int]
+		expectedOutputs []int
+		expectedErr     string
+	}{
+		{
+			name:  "process then expand the data into both dollars and pesos",
+			input: [][]int{{1, 2, 3}},
+			preprocessor: func(v []int) ([]int, error) {
+				for i := range v {
+					v[i] = v[i] * 2
+				}
+				return v, nil
+			},
+			batchFunc: func(v []int) (int, error) {
+				initial := 1
+				for _, num := range v {
+					initial *= num
+				}
+				return initial, nil
+			},
+			expectedOutputs: []int{48},
+		},
+		{
+			name:  "expand then post process the results",
+			input: [][]int{{2, 3, 4}},
+			batchFunc: func(v []int) (int, error) {
+				sum := 0
+				for _, num := range v {
+					sum += num
+				}
+				return sum, nil
+			},
+			postprocessor: func(v int) (int, error) {
+				return v * 3, nil
+			},
+			expectedOutputs: []int{27},
+		},
+		{
+			name:  "should transform one input into several different outputs",
+			input: [][]int{{5}, {4}, {3}, {2}, {1}},
+			batchFunc: func(v []int) (int, error) {
+				sum := 0
+				for _, num := range v {
+					sum += num
+				}
+				return sum + 10, nil
+			},
+			expectedOutputs: []int{15, 14, 13, 12, 11},
+		},
+		{
+			name:  "should error when the expandFunc returns an error",
+			input: [][]int{{5}},
+			batchFunc: func(v []int) (int, error) {
+				return 0, fmt.Errorf("error while expanding")
+			},
+			expectedErr: "error while expanding",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inputChan := make(chan []int)
+			errChan := make(chan error, 1)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer func() {
+				close(errChan)
+				cancel()
+			}()
+
+			go func() {
+				for _, inputArr := range tt.input {
+					inputChan <- inputArr
+				}
+				close(inputChan)
+			}()
+
+			pipe := New[[]int](ctx, inputChan, errChan)
+
+			if tt.preprocessor != nil {
+				pipe = pipe.Run(tt.preprocessor)
+			}
+
+			next_ := Reduce[int, int](pipe, 3, tt.batchFunc)
+			if tt.postprocessor != nil {
+				next_ = next_.Run(tt.postprocessor)
+			}
+			var results []int
+			for out := range next_.OrDone().Out() {
+				results = append(results, out)
+			}
+			select {
+			case err := <-errChan:
+				if err != nil && tt.expectedErr == "" {
+					t.Errorf("unexpected error: %v", err)
+				} else {
+					assert.Contains(t, err.Error(), tt.expectedErr)
+					return
+				}
+			default:
+				if tt.expectedErr != "" {
+					t.Errorf("expected error but got none")
+				}
+			}
+
+			assert.ElementsMatch(t, tt.expectedOutputs, results)
+		})
+	}
+}
+
 func TestDataStream_Sink(t *testing.T) {
 	type testCase struct {
 		name              string

@@ -11,6 +11,9 @@ type TransformFunc[T any, U any] func(T) (U, error)
 // This function type is used to expand a given input into multiple outputs
 type ExpandFunc[T any, U any] func(T) ([]U, error)
 
+// ReduceFunc collapses a slice of M items into a single output.
+type ReduceFunc[T any, U any] func([]T) (U, error)
+
 // FilterFunc is a user defined function type used in a given DataStream stage
 // This function type is used to filter a given input type
 type FilterFunc[T any] func(T) (bool, error)
