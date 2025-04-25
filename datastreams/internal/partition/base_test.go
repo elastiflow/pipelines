@@ -2,7 +2,6 @@ package partition
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -40,10 +39,10 @@ func TestBatch_NextOnEmpty(t *testing.T) {
 func TestBase_PushAddsToBatch(t *testing.T) {
 	ctx := context.Background()
 	errs := make(chan error, 1)
-	out := make(pipes.Pipes[string], 1)
+	out := make(pipes.Pipes[[]string], 1)
 	out.Initialize(1)
 
-	base := NewBase[string, string](ctx, out[0], errs)
+	base := NewBase[string](ctx, out.Senders(), errs)
 	base.Push("foo")
 
 	assert.Equal(t, 1, base.Batch.Len())
@@ -52,17 +51,12 @@ func TestBase_PushAddsToBatch(t *testing.T) {
 func TestBase_FlushSuccess(t *testing.T) {
 	ctx := context.Background()
 	errs := make(chan error, 1)
-	out := make(pipes.Pipes[string], 1)
+	out := make(pipes.Pipes[[]string], 1)
 	out.Initialize(1)
 
-	base := NewBase[string, string](ctx, out[0], errs)
+	base := NewBase[string](ctx, out.Senders(), errs)
 
-	// procFunc returns "ok"
-	proc := func(items []string) (string, error) {
-		return "aggregated", nil
-	}
-
-	go base.Flush(ctx, []string{"a", "b"}, proc, errs)
+	go base.Flush(ctx, []string{"a", "b"})
 
 	select {
 	case v := <-out[0]:
@@ -72,26 +66,4 @@ func TestBase_FlushSuccess(t *testing.T) {
 	}
 
 	assert.Empty(t, errs)
-}
-
-func TestBase_FlushError(t *testing.T) {
-	ctx := context.Background()
-	errs := make(chan error, 1)
-	out := make(pipes.Pipes[string], 1)
-	out.Initialize(1)
-
-	base := NewBase[string, string](ctx, out[0], errs)
-
-	proc := func(_ []string) (string, error) {
-		return "", errors.New("fail")
-	}
-
-	base.Flush(ctx, []string{"x"}, proc, errs)
-
-	select {
-	case err := <-errs:
-		assert.EqualError(t, err, "fail")
-	case <-time.After(100 * time.Millisecond):
-		t.Error("Flush did not report error")
-	}
 }

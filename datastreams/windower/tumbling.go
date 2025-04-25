@@ -2,6 +2,7 @@ package windower
 
 import (
 	"context"
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sync"
 	"time"
 
@@ -11,39 +12,34 @@ import (
 // tumbling buffers items for windowDuration once the first item arrives.
 // After windowDuration, it publishes the batch and clears it, then waits
 // for the next item to start a new timer.
-type tumbling[T any, R any] struct {
-	*partition.Base[T, R]
-
+type tumbling[T any] struct {
+	*partition.Base[T]
 	windowDuration time.Duration
-	procFunc       func([]T) (R, error)
-
-	mu           sync.Mutex
-	timerStarted bool
+	mu             sync.Mutex
+	timerStarted   bool
 }
 
 // newTumbling constructs a tumbling window partition. The first Push
 // after a flush will start a new window timer.
-func newTumbling[T any, R any](
+func newTumbling[T any](
 	ctx context.Context,
-	out chan R,
-	procFunc func([]T) (R, error),
+	out pipes.Senders[[]T],
 	errs chan<- error,
 	windowDuration time.Duration,
-) partition.Partition[T, R] {
+) partition.Partition[T] {
 	if windowDuration <= 0 {
 		panic("windowDuration must be > 0")
 	}
 
-	t := &tumbling[T, R]{
-		Base:           partition.NewBase[T, R](ctx, out, errs),
+	t := &tumbling[T]{
+		Base:           partition.NewBase[T](ctx, out, errs),
 		windowDuration: windowDuration,
-		procFunc:       procFunc,
 	}
 	return t
 }
 
 // Push adds to the current batch; if no timer is running, start one.
-func (t *tumbling[T, R]) Push(item T) {
+func (t *tumbling[T]) Push(item T) {
 	t.Base.Push(item)
 
 	t.mu.Lock()
@@ -55,7 +51,7 @@ func (t *tumbling[T, R]) Push(item T) {
 }
 
 // waitAndFlush sleeps windowDuration, then flushes whatever is in the batch.
-func (t *tumbling[T, R]) waitAndFlush() {
+func (t *tumbling[T]) waitAndFlush() {
 	timer := time.NewTimer(t.windowDuration)
 	defer timer.Stop()
 
@@ -66,8 +62,7 @@ func (t *tumbling[T, R]) waitAndFlush() {
 		// snapshot & clear
 		next := t.Batch.Next()
 		// publish
-		t.Flush(t.Ctx, next, t.procFunc, t.Errs)
-		// allow a new window to start
+		t.Flush(t.Ctx, next)
 		t.mu.Lock()
 		t.timerStarted = false
 		t.mu.Unlock()
@@ -79,14 +74,13 @@ func (t *tumbling[T, R]) waitAndFlush() {
 // creating multiple instances with the same processing function and
 // window duration.
 func NewTumblingFactory[T any, R any](
-	procFunc func([]T) (R, error),
 	windowDuration time.Duration,
-) partition.Factory[T, R] {
+) partition.Factory[T] {
 	return func(
 		ctx context.Context,
-		out chan R,
+		out pipes.Senders[[]T],
 		errs chan<- error,
-	) partition.Partition[T, R] {
-		return newTumbling(ctx, out, procFunc, errs, windowDuration)
+	) partition.Partition[T] {
+		return newTumbling(ctx, out, errs, windowDuration)
 	}
 }

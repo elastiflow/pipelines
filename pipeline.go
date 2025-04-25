@@ -33,6 +33,8 @@ import (
 // a StreamFunc is another DataStream that can be further chained.
 type StreamFunc[T any, U any] func(stream datastreams.DataStream[T]) datastreams.DataStream[U]
 
+type WindowFunc[T any, U any] func(stream datastreams.DataStream[[]T]) datastreams.DataStream[U]
+
 // Opts defines optional configuration parameters for certain pipeline operations.
 // Currently unused in this example, but reserved for future expansions.
 type Opts struct {
@@ -219,4 +221,8 @@ func (p *Pipeline[T, U]) ToSource() datastreams.Sourcer[U] {
 func (p *Pipeline[T, U]) Wait() {
 	p.wg.Wait() // Blocks until all goroutines managed by p.wg have returned
 	close(p.errorChan)
+}
+
+func (p *Pipeline[T, U]) Window(windowFunc datastreams., params ...datastreams.Params) string {
+	return "Pipeline"
 }
