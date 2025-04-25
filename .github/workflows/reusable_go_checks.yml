@@ -204,6 +204,6 @@ jobs:
           REPORT_COVERAGE_CMD: ${{ inputs.unit_test_report_coverage_cmd }}
         run: |
           echo "Coverage:" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          "$REPORT_COVERAGE_CMD" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '```'      >> "$GITHUB_STEP_SUMMARY"
+          sh -c "$REPORT_COVERAGE_CMD" >> "$GITHUB_STEP_SUMMARY"
+          echo '```'      >> "$GITHUB_STEP_SUMMARY"
