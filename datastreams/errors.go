@@ -13,7 +13,7 @@ const (
 	FILTER
 	MAP
 	SINK
-	EXPAND = 4
+	EXPAND
 )
 
 // String converts ErrorCode enum into a string value
