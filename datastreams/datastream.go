@@ -14,6 +14,11 @@ type DataStream[T any] struct {
 	wg        *sync.WaitGroup
 }
 
+type ReducerStruct[T any] struct {
+	data T
+	id   string
+}
+
 // New constructs a new DataStream of a given type by passing in a context, an input
 // channel, and an error channel. Additional channels can be introduced internally
 // via transformations like FanOut.
@@ -506,48 +511,58 @@ func Reduce[T any, U any](
 	return nextPipe
 }
 
-//func Contract[T any, U any](
-//	ds DataStream[T],
-//	batchSize int,
-//	reduceFunc ReduceFunc[T, U],
-//	params ...Params,
-//) DataStream[U] {
-//	param := applyParams(params...)
-//	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
-//	for i := 0; i < len(ds.inStreams); i++ {
-//		ds.incrementWaitGroup(1)
-//
-//		go func(inStream <-chan []T, outStream chan<- U, reducer ReduceFunc[T, U]) {
-//			if ds.wg != nil {
-//				defer ds.wg.Done()
-//			}
-//			defer close(outStream)
-//			for {
-//				select {
-//				case <-ds.ctx.Done():
-//					return
-//				case v, ok := <-inStream:
-//					if !ok {
-//						return
-//					}
-//					val, err := reduceFunc(v)
-//					if err != nil {
-//						ds.errStream <- newMapError(param.SegmentName, err)
-//						if param.SkipError {
-//							continue
-//						}
-//					}
-//					select {
-//					case outStream <- val:
-//					case <-ds.ctx.Done():
-//						return
-//					}
-//				}
-//			}
-//		}(ds.inStreams[i], outChannels[i], reduceFunc)
-//	}
-//	return nextPipe
-//}
+func Contract[T any, U any](
+	ds DataStream[T],
+	batchSize int,
+	reduceFunc ReduceFunc[T, U],
+	params ...Params,
+) DataStream[U] {
+	param := applyParams(params...)
+	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
+	for i := 0; i < len(ds.inStreams); i++ {
+		ds.incrementWaitGroup(1)
+
+		go func(inStream <-chan T, outStream chan<- U, reducer ReduceFunc[T, U]) {
+			if ds.wg != nil {
+				defer ds.wg.Done()
+			}
+			defer close(outStream)
+
+			current := make([]T, batchSize)
+			for {
+				select {
+				case <-ds.ctx.Done():
+					return
+				case v, ok := <-inStream:
+					if !ok {
+						return
+					}
+					current = append(current, v)
+
+					if len(current) < batchSize {
+						continue
+					}
+
+					val, err := reduceFunc(current)
+					if err != nil {
+						ds.errStream <- newMapError(param.SegmentName, err)
+						if param.SkipError {
+							continue
+						}
+					}
+					current = make([]T, batchSize)
+
+					select {
+					case outStream <- val:
+					case <-ds.ctx.Done():
+						return
+					}
+				}
+			}
+		}(ds.inStreams[i], outChannels[i], reduceFunc)
+	}
+	return nextPipe
+}
 
 func next[T any](
 	pipeType pipeType,
