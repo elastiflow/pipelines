@@ -421,18 +421,54 @@ func Expand[T any, U any](
 	return nextPipe
 }
 
+func ToArray[T any, U any](
+	ds DataStream[T],
+	expandFunc ExpandFunc[T, U],
+	params ...Params,
+) DataStream[[]U] {
+	param := applyParams(params...)
+	nextPipe, outChannels := next[[]U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
+	for i := 0; i < len(ds.inStreams); i++ {
+		ds.incrementWaitGroup(1)
+		go func(inStream <-chan T, outStream chan<- []U, expander ExpandFunc[T, U]) {
+			if ds.wg != nil {
+				defer ds.wg.Done()
+			}
+			defer close(outStream)
+			for {
+				select {
+				case <-ds.ctx.Done():
+					return
+				case v, ok := <-inStream:
+					if !ok {
+						return
+					}
+					outputs, err := expander(v)
+					if err != nil {
+						ds.errStream <- newExpandError(param.SegmentName, err)
+						if param.SkipError {
+							continue
+						}
+					}
+					select {
+					case outStream <- outputs:
+					case <-ds.ctx.Done():
+						return
+					}
+				}
+			}
+		}(ds.inStreams[i], outChannels[i], expandFunc)
+	}
+	return nextPipe
+}
+
 // Reduce collects exactly batchSize (= M) inputs, applies reducer, and
 // forwards one value.  It keeps memory bounded by re-using the same slice.
 func Reduce[T any, U any](
 	ds DataStream[[]T],
-	batchSize int,
 	reducer ReduceFunc[T, U],
 	params ...Params,
 ) DataStream[U] {
-	if batchSize <= 0 {
-		panic("batchSize must be > 0")
-	}
-
 	param := applyParams(params...)
 	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
 	for i := 0; i < len(ds.inStreams); i++ {
@@ -469,6 +505,49 @@ func Reduce[T any, U any](
 	}
 	return nextPipe
 }
+
+//func Contract[T any, U any](
+//	ds DataStream[T],
+//	batchSize int,
+//	reduceFunc ReduceFunc[T, U],
+//	params ...Params,
+//) DataStream[U] {
+//	param := applyParams(params...)
+//	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
+//	for i := 0; i < len(ds.inStreams); i++ {
+//		ds.incrementWaitGroup(1)
+//
+//		go func(inStream <-chan []T, outStream chan<- U, reducer ReduceFunc[T, U]) {
+//			if ds.wg != nil {
+//				defer ds.wg.Done()
+//			}
+//			defer close(outStream)
+//			for {
+//				select {
+//				case <-ds.ctx.Done():
+//					return
+//				case v, ok := <-inStream:
+//					if !ok {
+//						return
+//					}
+//					val, err := reduceFunc(v)
+//					if err != nil {
+//						ds.errStream <- newMapError(param.SegmentName, err)
+//						if param.SkipError {
+//							continue
+//						}
+//					}
+//					select {
+//					case outStream <- val:
+//					case <-ds.ctx.Done():
+//						return
+//					}
+//				}
+//			}
+//		}(ds.inStreams[i], outChannels[i], reduceFunc)
+//	}
+//	return nextPipe
+//}
 
 func next[T any](
 	pipeType pipeType,

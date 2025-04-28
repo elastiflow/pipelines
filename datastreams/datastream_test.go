@@ -982,7 +982,7 @@ func TestDataStream_Batch(t *testing.T) {
 				pipe = pipe.Run(tt.preprocessor)
 			}
 
-			next_ := Reduce[int, int](pipe, 3, tt.batchFunc)
+			next_ := Reduce[int, int](pipe, tt.batchFunc)
 			if tt.postprocessor != nil {
 				next_ = next_.Run(tt.postprocessor)
 			}
