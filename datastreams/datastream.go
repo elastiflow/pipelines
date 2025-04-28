@@ -585,7 +585,7 @@ func Contract[T any, U any](
 					}
 					items = append(items, v)
 
-					if len(items) >= options.Max {
+					if options.Max != 0 && len(items) >= options.Max {
 						flush()
 						timer = time.NewTimer(options.Interval)
 					}
