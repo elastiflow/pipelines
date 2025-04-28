@@ -20,6 +20,12 @@ type ReducerStruct[T any] struct {
 	id   string
 }
 
+type ContractOptions struct {
+	Timeout  time.Duration
+	Interval time.Duration
+	Max      int
+}
+
 // New constructs a new DataStream of a given type by passing in a context, an input
 // channel, and an error channel. Additional channels can be introduced internally
 // via transformations like FanOut.
@@ -520,13 +526,11 @@ func Reduce[T any, U any](
 func Contract[T any, U any](
 	ds DataStream[T],
 	reduceFunc ReduceFunc[T, U],
-	timeout time.Duration,
+	options ContractOptions,
 	params ...Params,
 ) DataStream[U] {
 	param := applyParams(params...)
 	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
-
-	//const idleTimeout = time.Second
 
 	for i := 0; i < len(ds.inStreams); i++ {
 		ds.incrementWaitGroup(1)
@@ -538,7 +542,9 @@ func Contract[T any, U any](
 			defer close(outStream)
 
 			var items []T
-			timer := time.NewTimer(timeout)
+
+			var timer *time.Timer
+			//timer := time.NewTimer(options.Timeout)
 
 			flush := func() bool { // returns true if stream should terminate
 				if len(items) == 0 {
@@ -571,7 +577,15 @@ func Contract[T any, U any](
 						flush() // final batch
 						return
 					}
+					if len(items) == 0 {
+						timer = time.NewTimer(options.Timeout)
+					}
 					items = append(items, v)
+
+					if len(items) >= options.Max {
+						flush()
+						timer = time.NewTimer(options.Timeout)
+					}
 					//resetTimer()
 
 				case <-func() <-chan time.Time {
@@ -581,7 +595,7 @@ func Contract[T any, U any](
 					return timer.C
 				}():
 					if flush() {
-						return
+						//return
 					}
 				}
 			}
