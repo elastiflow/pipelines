@@ -3,6 +3,7 @@ package datastreams
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // DataStream is a struct that defines a generic stream process stage.
@@ -511,14 +512,22 @@ func Reduce[T any, U any](
 	return nextPipe
 }
 
+// Contract collects values from each upstream channel.  As soon as there has
+// been a full second with no new value, it calls the reducer on everything
+// gathered so far, emits the reduced result once, clears the buffer, and then
+// resumes listening.  The cycle repeats until the channel is closed or the
+// context is cancelled.
 func Contract[T any, U any](
 	ds DataStream[T],
-	batchSize int,
 	reduceFunc ReduceFunc[T, U],
+	timeout time.Duration,
 	params ...Params,
 ) DataStream[U] {
 	param := applyParams(params...)
 	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
+
+	//const idleTimeout = time.Second
+
 	for i := 0; i < len(ds.inStreams); i++ {
 		ds.incrementWaitGroup(1)
 
@@ -528,33 +537,50 @@ func Contract[T any, U any](
 			}
 			defer close(outStream)
 
-			current := make([]T, batchSize)
+			var items []T
+			timer := time.NewTimer(timeout)
+
+			flush := func() bool { // returns true if stream should terminate
+				if len(items) == 0 {
+					return false
+				}
+				val, err := reducer(items)
+				if err != nil {
+					ds.errStream <- newMapError(param.SegmentName, err)
+					if param.SkipError {
+						items = items[:0]
+						return false
+					}
+				}
+				select {
+				case <-ds.ctx.Done():
+					return true
+				case outStream <- val:
+				}
+				items = items[:0]
+				return false
+			}
+
 			for {
 				select {
 				case <-ds.ctx.Done():
 					return
+
 				case v, ok := <-inStream:
 					if !ok {
+						flush() // final batch
 						return
 					}
-					current = append(current, v)
+					items = append(items, v)
+					//resetTimer()
 
-					if len(current) < batchSize {
-						continue
+				case <-func() <-chan time.Time {
+					if timer == nil {
+						return nil // no timer yet: don’t block
 					}
-
-					val, err := reduceFunc(current)
-					if err != nil {
-						ds.errStream <- newMapError(param.SegmentName, err)
-						if param.SkipError {
-							continue
-						}
-					}
-					current = make([]T, batchSize)
-
-					select {
-					case outStream <- val:
-					case <-ds.ctx.Done():
+					return timer.C
+				}():
+					if flush() {
 						return
 					}
 				}
