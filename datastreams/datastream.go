@@ -21,9 +21,10 @@ type ReducerStruct[T any] struct {
 }
 
 type ContractOptions struct {
-	Timeout  time.Duration
-	Interval time.Duration
-	Max      int
+	Timeout             time.Duration
+	Interval            time.Duration
+	Max                 int
+	AllowEmptyIntervals bool
 }
 
 // New constructs a new DataStream of a given type by passing in a context, an input
@@ -548,7 +549,9 @@ func Contract[T any, U any](
 
 			flush := func() bool { // returns true if stream should terminate
 				if len(items) == 0 {
-					return false
+					// If allowing empty intervals, return false
+					// If not allowing empty intervals, exit stream
+					return !options.AllowEmptyIntervals
 				}
 				val, err := reducer(items)
 				if err != nil {
@@ -578,13 +581,13 @@ func Contract[T any, U any](
 						return
 					}
 					if len(items) == 0 {
-						timer = time.NewTimer(options.Timeout)
+						timer = time.NewTimer(options.Interval)
 					}
 					items = append(items, v)
 
 					if len(items) >= options.Max {
 						flush()
-						timer = time.NewTimer(options.Timeout)
+						timer = time.NewTimer(options.Interval)
 					}
 					//resetTimer()
 
