@@ -13,6 +13,7 @@ const (
 	FILTER
 	MAP
 	SINK
+	EXPAND
 	KEY_BY
 	WINDOW
 )
@@ -24,6 +25,7 @@ func (w ErrorCode) String() string {
 		"FILTER",
 		"MAP",
 		"SINK",
+		"EXPAND",
 		"KEY_BY",
 		"WINDOW",
 	}[w]
@@ -71,6 +73,10 @@ func newSinkError(segment string, err error) error {
 	return newError(SINK, segment, err.Error())
 }
 
+func newExpandError(segment string, err error) error {
+	return newError(EXPAND, segment, err.Error())
+}
+
 func isError(err error, code ErrorCode) bool {
 	return strings.Contains(
 		err.Error(),
@@ -94,6 +100,12 @@ func IsFilterError(err error) bool {
 // It returns true if the error is a MAP error, otherwise false.
 func IsMapError(err error) bool {
 	return isError(err, MAP)
+}
+
+// IsExpandError checks if the given error is an EXPAND error.
+// It returns true if the error is an EXPAND error, otherwise false.
+func IsExpandError(err error) bool {
+	return isError(err, EXPAND)
 }
 
 func IsSinkError(err error) bool {

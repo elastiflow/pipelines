@@ -11,6 +11,17 @@ clean:
 ############################################
 # All custom targets goes after this line
 ############################################
+.PHONY: scan\:sbom
+scan\:sbom:
+	trivy fs --format cyclonedx .
+
+.PHONY: scan\:sca
+scan\:sca:
+	trivy fs .
+
+.PHONY: scan\:sast
+scan\:sast:
+	semgrep scan --config p/ci && gosec -terse -severity high ./...
 
 .PHONY: scan\:license
 scan\:license:
@@ -19,7 +30,3 @@ scan\:license:
 .PHONY: docs
 docs:
 	godoc -http=:6060
-
-.PHONY: lint
-lint:
-	staticcheck ./...

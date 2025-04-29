@@ -213,6 +213,11 @@ func (p DataStream[T]) FanOut(
 func (p DataStream[T]) FanIn(
 	params ...Params,
 ) DataStream[T] {
+	// If there's only one input stream, then no need to fan in
+	if len(p.inStreams) == 1 {
+		return p
+	}
+
 	param := applyParams(params...)
 	nextPipe, outChannels := p.nextT(fanIn, param)
 	outSenders := outChannels.Senders()
@@ -380,6 +385,49 @@ func Map[T any, U any](
 				}
 			}
 		}(ds.inStreams[i], outChannels[i], transformFunc)
+	}
+	return nextPipe
+}
+
+func Expand[T any, U any](
+	ds DataStream[T],
+	expandFunc ExpandFunc[T, U],
+	params ...Params,
+) DataStream[U] {
+	param := applyParams(params...)
+	nextPipe, outChannels := next[U](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
+	for i := 0; i < len(ds.inStreams); i++ {
+		ds.incrementWaitGroup(1)
+		go func(inStream <-chan T, outStream chan<- U, expander ExpandFunc[T, U]) {
+			if ds.wg != nil {
+				defer ds.wg.Done()
+			}
+			defer close(outStream)
+			for {
+				select {
+				case <-ds.ctx.Done():
+					return
+				case v, ok := <-inStream:
+					if !ok {
+						return
+					}
+					outputs, err := expander(v)
+					if err != nil {
+						ds.errStream <- newExpandError(param.SegmentName, err)
+						if param.SkipError {
+							continue
+						}
+					}
+					for _, output := range outputs {
+						select {
+						case outStream <- output:
+						case <-ds.ctx.Done():
+							return
+						}
+					}
+				}
+			}
+		}(ds.inStreams[i], outChannels[i], expandFunc)
 	}
 	return nextPipe
 }
