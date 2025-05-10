@@ -73,7 +73,7 @@ func (t *tumbling[T]) waitAndFlush() {
 // to create new instances of tumbling. This is useful for
 // creating multiple instances with the same processing function and
 // window duration.
-func NewTumblingFactory[T any, R any](
+func NewTumblingFactory[T any](
 	windowDuration time.Duration,
 ) partition.Factory[T] {
 	return func(

@@ -136,7 +136,7 @@ func Window[T any, K comparable, R any](
 	return nextPipe
 }
 
-func WindowAll[T any, K comparable, R any](
+func WindowAll[T any, R any](
 	ds DataStream[T],
 	wf WindowFunc[T, R],
 	pf partition.Factory[T],

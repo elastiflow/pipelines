@@ -209,7 +209,3 @@ func (p *Pipeline[T, U]) Wait() {
 	p.wg.Wait() // Blocks until all goroutines managed by p.wg have returned
 	close(p.errorChan)
 }
-
-func (p *Pipeline[T, U]) Window(windowFunc datastreams., params ...datastreams.Params) string {
-	return "Pipeline"
-}
