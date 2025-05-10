@@ -3,6 +3,7 @@ package sources
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,6 +39,7 @@ func TestArraySource_Source(t *testing.T) {
 		values       []string
 		setupContext func() context.Context
 		expected     []string
+		opts         Params
 	}{
 		{
 			name:   "given valid values, should send values to output channel",
@@ -57,11 +59,24 @@ func TestArraySource_Source(t *testing.T) {
 			},
 			expected: []string{},
 		},
+		{
+			name:   "should respect throttle",
+			values: []string{"a", "b", "c"},
+			setupContext: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			expected: []string{},
+			opts: Params{
+				Throttle: 50 * time.Millisecond,
+			},
+		},
 	}
 
 	for _, tt := range testcases {
 		t.Run(tt.name, func(t *testing.T) {
-			newSlice := FromArray(tt.values)
+			newSlice := FromArray(tt.values, tt.opts)
 			var errSender chan error
 
 			ctx := tt.setupContext()
