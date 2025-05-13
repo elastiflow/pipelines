@@ -81,7 +81,6 @@ func (m *manager[T, K]) Partition(key K, value T) {
 	}
 
 	if m.generator != nil {
-		eventTime = m.generator.GetWatermark()
 		m.generator.OnEvent(value, eventTime)
 	}
 
