@@ -3,17 +3,23 @@ package datastreams
 import (
 	"context"
 	"fmt"
-	"github.com/elastiflow/pipelines/datastreams/windower"
-	"github.com/stretchr/testify/assert"
 	"sort"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/elastiflow/pipelines/datastreams/windower"
+	"github.com/stretchr/testify/assert"
 )
 
 type testStruct struct {
 	ID   int
 	Name string
+}
+
+func drain(outCh <-chan testStruct) {
+	for range outCh {
+	}
 }
 
 func TestKeyBy(t *testing.T) {
@@ -125,7 +131,6 @@ func TestWindow(t *testing.T) {
 			errCh := make(chan error, 10)
 			input := make(chan testStruct, 10)
 			go func(appCtx context.Context, inputElements []testStruct) {
-				defer close(input)
 				for _, elem := range inputElements {
 					input <- elem
 				}
@@ -158,11 +163,6 @@ func TestWindow(t *testing.T) {
 
 			assert.ElementsMatch(t, tt.expected, endRes)
 		})
-	}
-}
-
-func drain(outCh <-chan testStruct) {
-	for range outCh {
 	}
 }
 

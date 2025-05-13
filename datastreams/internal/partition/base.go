@@ -2,8 +2,9 @@ package partition
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sync"
+
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
 
 type Batch[T any] struct {
@@ -45,23 +46,20 @@ func (s *Batch[T]) Len() int {
 // Base provides a shared Publish method to send aggregated results
 // into the output channels.
 type Base[T any] struct {
-	Ctx   context.Context
 	Batch *Batch[T]
 	Errs  chan<- error
-	out   pipes.Senders[[]T]
+	Out   pipes.Senders[[]T]
 }
 
 // NewBase constructs a new Base instance.
 func NewBase[T any](
-	ctx context.Context,
 	out pipes.Senders[[]T],
 	errs chan<- error,
 ) *Base[T] {
 	return &Base[T]{
-		Ctx:   ctx,
 		Batch: NewBatch[T](),
 		Errs:  errs,
-		out:   out,
+		Out:   out,
 	}
 }
 
@@ -71,8 +69,16 @@ func (b *Base[T]) Push(item T) {
 	b.Batch.Push(item)
 }
 
+func (b *Base[T]) FlushNext(ctx context.Context) {
+	next := b.Batch.Next()
+	if len(next) == 0 {
+		return
+	}
+	b.Flush(ctx, next)
+}
+
 func (b *Base[T]) Flush(ctx context.Context, next []T) {
-	for _, out := range b.out {
+	for _, out := range b.Out {
 		select {
 		case <-ctx.Done():
 			return

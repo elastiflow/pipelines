@@ -1,6 +1,8 @@
 package datastreams
 
 import (
+	"context"
+
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 )
 
@@ -89,11 +91,11 @@ func Window[T any, K comparable, R any](
 
 	for _, in := range keyedDs.inStreams {
 		keyedDs.incrementWaitGroup(1)
-		go func(pm partition.Partitioner[T, K], inStream <-chan T) {
+		go func(ctx context.Context, pm partition.Partitioner[T, K], inStream <-chan T) {
 			defer keyedDs.decrementWaitGroup()
 			for {
 				select {
-				case <-keyedDs.ctx.Done():
+				case <-ctx.Done():
 					return
 				case item, ok := <-inStream:
 					if !ok {
@@ -103,7 +105,7 @@ func Window[T any, K comparable, R any](
 					pm.Partition(key, item)
 				}
 			}
-		}(pm, in)
+		}(keyedDs.ctx, pm, in)
 	}
 
 	for i, in := range windowPipe.inStreams {
@@ -126,65 +128,6 @@ func Window[T any, K comparable, R any](
 					select {
 					case outStream <- result:
 					case <-keyedDs.ctx.Done():
-					}
-
-				}
-			}
-		}(in, outChans[i])
-	}
-
-	return nextPipe
-}
-
-func WindowAll[T any, R any](
-	ds DataStream[T],
-	wf WindowFunc[T, R],
-	pf partition.Factory[T],
-	param ...Params,
-) DataStream[R] {
-	appliedParams := applyParams(param...)
-	nextPipe, outChans := next[R](standard, appliedParams, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
-	windowPipe, windowOutChan := next[[]T](standard, appliedParams, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
-	p := pf(ds.ctx, windowOutChan.Senders(), ds.errStream)
-	for _, in := range ds.inStreams {
-		ds.incrementWaitGroup(1)
-		go func(partition partition.Partition[T], inStream <-chan T) {
-			defer ds.decrementWaitGroup()
-			for {
-				select {
-				case <-ds.ctx.Done():
-					return
-				case item, ok := <-inStream:
-					if !ok {
-						return
-					}
-
-					partition.Push(item)
-				}
-			}
-		}(p, in)
-	}
-
-	for i, in := range windowPipe.inStreams {
-		ds.incrementWaitGroup(1)
-		go func(inStream <-chan []T, outStream chan<- R) {
-			defer ds.decrementWaitGroup()
-			for {
-				select {
-				case <-ds.ctx.Done():
-					return
-				case items, ok := <-inStream:
-					if !ok {
-						return
-					}
-					result, err := wf(items)
-					if err != nil {
-						ds.errStream <- err
-						continue
-					}
-					select {
-					case outStream <- result:
-					case <-ds.ctx.Done():
 					}
 
 				}

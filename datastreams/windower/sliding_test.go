@@ -2,48 +2,150 @@ package windower
 
 import (
 	"context"
-	"errors"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
-	"github.com/stretchr/testify/assert"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestSlidingWindow_ProcError(t *testing.T) {
-	wantErr := errors.New("bad")
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
+func TestNewSliding(t *testing.T) {
+	testcases := []struct {
+		name           string
+		windowDuration time.Duration
+		slideInterval  time.Duration
+		shouldPanic    bool
+	}{
+		{
+			name:           "valid parameters",
+			windowDuration: 200 * time.Millisecond,
+			slideInterval:  50 * time.Millisecond,
+			shouldPanic:    false,
+		},
+		{
+			name:           "zero window duration",
+			windowDuration: 0,
+			slideInterval:  50 * time.Millisecond,
+			shouldPanic:    true,
+		},
+		{
+			name:           "zero slide interval",
+			windowDuration: 200 * time.Millisecond,
+			slideInterval:  0,
+			shouldPanic:    true,
+		},
+		{
+			name:           "negative window duration",
+			windowDuration: -100 * time.Millisecond,
+			slideInterval:  50 * time.Millisecond,
+			shouldPanic:    true,
+		},
+	}
 
-	errs := make(chan error, 10)
-	out := make(pipes.Pipes[[]int], 1)
-	out.Initialize(10)
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
 
-	w := newSliding[int, int](ctx, out.Senders(), errs, 100*time.Millisecond, 50*time.Millisecond)
+			errs := make(chan error, 10)
+			out := make(pipes.Pipes[[]int], 1)
+			out.Initialize(10)
+			defer out.Close()
 
-	go func() {
-		defer out.Close()
-		w.Push(42)
-		time.Sleep(120 * time.Millisecond) // allow at least one flush
-	}()
-
-	// drain output (should be none)
-	go func() {
-		for range out[0] {
-		}
-	}()
-
-	var gotErrs []error
-	for {
-		select {
-		case e := <-errs:
-			gotErrs = append(gotErrs, e)
-		case <-ctx.Done():
-			assert.NotEmpty(t, gotErrs, "expected at least one error")
-			for _, e := range gotErrs {
-				assert.Equal(t, wantErr, e)
+			if tc.shouldPanic {
+				assert.Panics(t, func() {
+					newSliding[int](ctx, out.Senders(), errs, tc.windowDuration, tc.slideInterval)
+				}, "Expected panic when interval or slideInterval is less than or equal to 0")
+				return
 			}
-			return
-		}
+
+			s := newSliding[int](ctx, out.Senders(), errs, tc.windowDuration, tc.slideInterval)
+			assert.NotNil(t, s)
+		})
+	}
+}
+
+func TestSlidingBatch_next(t *testing.T) {
+	type testCase[T any] struct {
+		name           string
+		initialRecords []record[T]
+		windowDuration time.Duration
+		now            time.Time
+		final          bool
+		want           []T
+	}
+
+	now := time.Now()
+
+	tests := []testCase[int]{
+		{
+			name:           "no records",
+			initialRecords: nil,
+			windowDuration: time.Second,
+			now:            now,
+			final:          false,
+			want:           []int{},
+		},
+		{
+			name: "all records within window",
+			initialRecords: []record[int]{
+				{val: 1, ts: now.Add(-500 * time.Millisecond)},
+				{val: 2, ts: now.Add(-200 * time.Millisecond)},
+			},
+			windowDuration: time.Second,
+			now:            now,
+			final:          false,
+			want:           []int{1, 2},
+		},
+		{
+			name: "some records outside window",
+			initialRecords: []record[int]{
+				{val: 1, ts: now.Add(-2 * time.Second)},
+				{val: 2, ts: now.Add(-500 * time.Millisecond)},
+				{val: 3, ts: now.Add(-100 * time.Millisecond)},
+			},
+			windowDuration: time.Second,
+			now:            now,
+			final:          false,
+			want:           []int{2, 3},
+		},
+		{
+			name: "all records outside window",
+			initialRecords: []record[int]{
+				{val: 1, ts: now.Add(-3 * time.Second)},
+				{val: 2, ts: now.Add(-2 * time.Second)},
+			},
+			windowDuration: time.Second,
+			now:            now,
+			final:          false,
+			want:           []int{},
+		},
+		{
+			name: "final flush",
+			initialRecords: []record[int]{
+				{val: 1, ts: now.Add(-500 * time.Millisecond)},
+				{val: 2, ts: now},
+			},
+			windowDuration: time.Second,
+			now:            now,
+			final:          true,
+			want:           []int{1, 2},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sb := &slidingBatch[int]{
+				items: tt.initialRecords, // copy to avoid mutation across cases
+				mu:    sync.RWMutex{},
+			}
+			got := sb.next(tt.windowDuration, tt.now, tt.final)
+
+			assert.Len(t, got, len(tt.want))
+			assert.ElementsMatch(t, got, tt.want, "unexpected result")
+		})
 	}
 }
 

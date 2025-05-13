@@ -2,8 +2,9 @@ package datastreams
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sync"
+
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
 
 // DataStream is a struct that defines a generic stream process stage.

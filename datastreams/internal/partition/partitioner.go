@@ -2,8 +2,9 @@ package partition
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"time"
+
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
 
 type TimeMarker interface {
@@ -80,8 +81,8 @@ func (m *manager[T, K]) Partition(key K, value T) {
 	}
 
 	if m.generator != nil {
-		m.generator.OnEvent(value, eventTime)
 		eventTime = m.generator.GetWatermark()
+		m.generator.OnEvent(value, eventTime)
 	}
 
 	p.Push(value)

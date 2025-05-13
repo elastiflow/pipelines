@@ -13,9 +13,9 @@ const (
 	FILTER
 	MAP
 	SINK
+	EXPAND
 	KEY_BY
 	WINDOW
-	EXPAND
 )
 
 // String converts ErrorCode enum into a string value
@@ -25,9 +25,9 @@ func (w ErrorCode) String() string {
 		"FILTER",
 		"MAP",
 		"SINK",
+		"EXPAND",
 		"KEY_BY",
 		"WINDOW",
-		"EXPAND",
 	}[w]
 }
 

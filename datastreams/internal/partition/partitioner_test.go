@@ -2,10 +2,11 @@ package partition
 
 import (
 	"context"
-	"github.com/stretchr/testify/mock"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/mock"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"github.com/stretchr/testify/assert"

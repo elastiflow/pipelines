@@ -37,37 +37,35 @@ func TestArraySource_Source(t *testing.T) {
 	testcases := []struct {
 		name         string
 		values       []string
-		setupContext func() context.Context
+		setupContext func() (context.Context, context.CancelFunc)
 		expected     []string
 		opts         Params
 	}{
 		{
 			name:   "given valid values, should send values to output channel",
 			values: []string{"a", "b", "c"},
-			setupContext: func() context.Context {
-				return context.Background()
+			setupContext: func() (context.Context, context.CancelFunc) {
+				return context.WithCancel(context.Background())
 			},
 			expected: []string{"a", "b", "c"},
 		},
 		{
 			name:   "given context is done, should return",
 			values: []string{"a", "b", "c"},
-			setupContext: func() context.Context {
+			setupContext: func() (context.Context, context.CancelFunc) {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
-				return ctx
+				return ctx, cancel
 			},
 			expected: []string{},
 		},
 		{
 			name:   "should respect throttle",
 			values: []string{"a", "b", "c"},
-			setupContext: func() context.Context {
-				ctx, cancel := context.WithCancel(context.Background())
-				cancel()
-				return ctx
+			setupContext: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 10*time.Millisecond)
 			},
-			expected: []string{},
+			expected: []string{"a"},
 			opts: Params{
 				Throttle: 50 * time.Millisecond,
 			},
@@ -79,9 +77,11 @@ func TestArraySource_Source(t *testing.T) {
 			newSlice := FromArray(tt.values, tt.opts)
 			var errSender chan error
 
-			ctx := tt.setupContext()
+			ctx, cancel := tt.setupContext()
+			defer cancel()
+			source := newSlice.Source(ctx, errSender)
 			var consumed []string
-			for val := range newSlice.Source(ctx, errSender).Out() {
+			for val := range source.Out() {
 				consumed = append(consumed, val)
 			}
 

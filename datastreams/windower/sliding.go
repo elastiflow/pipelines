@@ -2,17 +2,77 @@ package windower
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sync"
 	"time"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
 
 // record pairs a value with the moment it arrived.
 type record[T any] struct {
 	val T
 	ts  time.Time
+}
+
+type slidingBatch[T any] struct {
+	items []record[T]
+	mu    sync.RWMutex
+}
+
+// NewSlidingBatch constructs a new sliding batch.
+func newSlidingBatch[T any]() *slidingBatch[T] {
+	return &slidingBatch[T]{
+		items: make([]record[T], 0),
+	}
+}
+
+// Push appends the item with its arrival timestamp.
+func (s *slidingBatch[T]) push(item T, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items = append(s.items, record[T]{val: item, ts: now})
+}
+
+// next evicts old records and return the current window.
+func (s *slidingBatch[T]) next(
+	windowDuration time.Duration,
+	now time.Time,
+	final bool,
+) []T {
+	threshold := now.Add(-windowDuration)
+
+	s.mu.Lock()
+	// find cut index via binary search
+	cut := 0
+	for cut < len(s.items) && s.items[cut].ts.Before(threshold) {
+		cut++
+	}
+	if cut > 0 {
+		// reallocate so we don't hold old large backing arrays
+		tail := s.items[cut:]
+		newBuf := make([]record[T], len(tail))
+		copy(newBuf, tail)
+		s.items = newBuf
+	}
+
+	if len(s.items) == 0 {
+		s.mu.Unlock()
+		return []T{}
+	}
+
+	// snapshot values
+	window := make([]T, len(s.items))
+	for i, rec := range s.items {
+		window[i] = rec.val
+	}
+	if final {
+		s.items = nil
+	}
+
+	s.mu.Unlock()
+	// publish
+	return window
 }
 
 // sliding emits overlapping windows of size windowDuration,
@@ -22,9 +82,7 @@ type sliding[T any] struct {
 
 	windowDuration time.Duration
 	slideInterval  time.Duration
-
-	mu     sync.Mutex
-	buffer []record[T]
+	sb             *slidingBatch[T]
 }
 
 // newSliding constructs a sliding window partition that starts ticking immediately.
@@ -35,81 +93,50 @@ func newSliding[T any](
 	windowDuration, slideInterval time.Duration,
 ) partition.Partition[T] {
 	if windowDuration <= 0 || slideInterval <= 0 {
-		panic("windowDuration and slideInterval must be > 0")
+		panic("interval and slideInterval must be > 0")
 	}
 	if slideInterval > windowDuration {
-		panic("slideInterval cannot be larger than windowDuration")
+		panic("slideInterval cannot be larger than interval")
 	}
 
 	s := &sliding[T]{
-		Base:           partition.NewBase[T](ctx, out, errs),
+		Base:           partition.NewBase[T](out, errs),
 		windowDuration: windowDuration,
 		slideInterval:  slideInterval,
+		sb:             newSlidingBatch[T](),
 	}
-	go s.run()
+	go s.run(ctx)
 	return s
 }
 
 // Push appends the item with its arrival timestamp.
 func (s *sliding[T]) Push(item T) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.buffer = append(s.buffer, record[T]{val: item, ts: time.Now()})
+	s.sb.push(item, time.Now())
 }
 
 // run drives the periodic flushes.
-func (s *sliding[T]) run() {
+func (s *sliding[T]) run(ctx context.Context) {
 	ticker := time.NewTicker(s.slideInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-s.Ctx.Done():
+		case <-ctx.Done():
 			// final, non‑overlapping flush
-			s.flush(time.Now(), true)
-			return
+			next := s.sb.next(s.windowDuration, time.Now(), true)
+			if len(next) == 0 {
+				continue
+			}
+			s.Flush(ctx, next)
 
 		case now := <-ticker.C:
-			s.flush(now, false)
+			next := s.sb.next(s.windowDuration, now, false)
+			if len(next) == 0 {
+				continue
+			}
+			s.Flush(ctx, next)
 		}
 	}
-}
-
-// flush evicts old records and publishes the current window.
-func (s *sliding[T]) flush(now time.Time, final bool) {
-	threshold := now.Add(-s.windowDuration)
-
-	s.mu.Lock()
-	// find cut index via binary search
-	cut := 0
-	for cut < len(s.buffer) && s.buffer[cut].ts.Before(threshold) {
-		cut++
-	}
-	if cut > 0 {
-		// reallocate so we don't hold old large backing arrays
-		tail := s.buffer[cut:]
-		newBuf := make([]record[T], len(tail))
-		copy(newBuf, tail)
-		s.buffer = newBuf
-	}
-
-	if len(s.buffer) == 0 {
-		s.mu.Unlock()
-		return
-	}
-
-	// snapshot values
-	window := make([]T, len(s.buffer))
-	for i, rec := range s.buffer {
-		window[i] = rec.val
-	}
-	if final {
-		s.buffer = nil
-	}
-	s.mu.Unlock()
-
-	// publish
-	s.Flush(s.Ctx, window)
 }
 
 // NewSlidingFactory constructs a sliding window factory.

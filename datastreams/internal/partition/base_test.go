@@ -37,12 +37,11 @@ func TestBatch_NextOnEmpty(t *testing.T) {
 }
 
 func TestBase_PushAddsToBatch(t *testing.T) {
-	ctx := context.Background()
 	errs := make(chan error, 1)
 	out := make(pipes.Pipes[[]string], 1)
 	out.Initialize(1)
 
-	base := NewBase[string](ctx, out.Senders(), errs)
+	base := NewBase[string](out.Senders(), errs)
 	base.Push("foo")
 
 	assert.Equal(t, 1, base.Batch.Len())
@@ -54,15 +53,17 @@ func TestBase_FlushSuccess(t *testing.T) {
 	out := make(pipes.Pipes[[]string], 1)
 	out.Initialize(1)
 
-	base := NewBase[string](ctx, out.Senders(), errs)
+	base := NewBase[string](out.Senders(), errs)
+	base.Push("a")
+	base.Push("b")
 
-	go base.Flush(ctx, []string{"a", "b"})
+	go base.FlushNext(ctx)
 
 	select {
 	case v := <-out[0]:
-		assert.Equal(t, "aggregated", v)
+		assert.Equal(t, []string{"a", "b"}, v)
 	case <-time.After(100 * time.Millisecond):
-		t.Error("Flush did not send output")
+		t.Error("FlushNext did not send output")
 	}
 
 	assert.Empty(t, errs)

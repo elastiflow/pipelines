@@ -2,21 +2,44 @@ package windower
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sync"
 	"time"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
+
+type status struct {
+	started bool
+	mu      sync.Mutex
+}
+
+func newStatus() *status {
+	return &status{
+		started: false,
+	}
+}
+
+func (t *status) running() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.started
+}
+
+func (t *status) set(state bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.started = state
+}
 
 // tumbling buffers items for windowDuration once the first item arrives.
 // After windowDuration, it publishes the batch and clears it, then waits
 // for the next item to start a new timer.
 type tumbling[T any] struct {
 	*partition.Base[T]
+	ctx            context.Context
+	status         *status
 	windowDuration time.Duration
-	mu             sync.Mutex
-	timerStarted   bool
 }
 
 // newTumbling constructs a tumbling window partition. The first Push
@@ -28,12 +51,14 @@ func newTumbling[T any](
 	windowDuration time.Duration,
 ) partition.Partition[T] {
 	if windowDuration <= 0 {
-		panic("windowDuration must be > 0")
+		panic("interval must be > 0")
 	}
 
 	t := &tumbling[T]{
-		Base:           partition.NewBase[T](ctx, out, errs),
+		Base:           partition.NewBase[T](out, errs),
 		windowDuration: windowDuration,
+		ctx:            ctx,
+		status:         newStatus(),
 	}
 	return t
 }
@@ -42,10 +67,8 @@ func newTumbling[T any](
 func (t *tumbling[T]) Push(item T) {
 	t.Base.Push(item)
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if !t.timerStarted {
-		t.timerStarted = true
+	if !t.status.running() {
+		t.status.set(true)
 		go t.waitAndFlush()
 	}
 }
@@ -56,16 +79,11 @@ func (t *tumbling[T]) waitAndFlush() {
 	defer timer.Stop()
 
 	select {
-	case <-t.Ctx.Done():
+	case <-t.ctx.Done():
 		return
 	case <-timer.C:
-		// snapshot & clear
-		next := t.Batch.Next()
-		// publish
-		t.Flush(t.Ctx, next)
-		t.mu.Lock()
-		t.timerStarted = false
-		t.mu.Unlock()
+		t.Base.FlushNext(t.ctx)
+		t.status.set(false)
 	}
 }
 

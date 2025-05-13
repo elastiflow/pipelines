@@ -2,9 +2,10 @@ package windower
 
 import (
 	"context"
+	"time"
+
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
-	"time"
 )
 
 // timedInterval accumulates items and publishes them every `interval`.
@@ -21,28 +22,29 @@ func NewInterval[T any](
 	errs chan<- error,
 	interval time.Duration,
 ) partition.Partition[T] {
+	if interval <= 0 {
+		panic("interval must be > 0")
+	}
+
 	w := &timedInterval[T]{
-		Base:     partition.NewBase[T](ctx, out, errs),
+		Base:     partition.NewBase[T](out, errs),
 		interval: interval,
 	}
 	// Start the background ticker right away
-	go w.startInterval()
+	go w.startInterval(ctx)
 	return w
 }
 
 // startInterval continuously ticks every `w.interval`, publishes whatever
 // items are in the buffer, and clears it.
-func (t *timedInterval[T]) startInterval() {
+func (t *timedInterval[T]) startInterval(ctx context.Context) {
 	ticker := time.NewTicker(t.interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			if t.Batch.Len() == 0 {
-				continue
-			}
-			go t.Flush(t.Ctx, t.Batch.Next())
-		case <-t.Ctx.Done():
+			go t.FlushNext(ctx)
+		case <-ctx.Done():
 			return
 		}
 	}

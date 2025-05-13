@@ -2,7 +2,6 @@ package windower
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -10,7 +9,58 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTumblingWindow_Publish(t *testing.T) {
+func TestNewTumbling(t *testing.T) {
+	testcases := []struct {
+		name           string
+		windowDuration time.Duration
+		pushInterval   time.Duration
+		pushCount      int
+		expected       [][]int
+		assertPanics   bool
+	}{
+		{
+			name:           "Invalid window duration",
+			windowDuration: 0 * time.Millisecond,
+			pushInterval:   500 * time.Millisecond,
+			pushCount:      8,
+			expected:       [][]int{{1, 2, 3, 4}, {5, 6, 7, 8}},
+			assertPanics:   true,
+		},
+		{
+			name:           "Valid window duration",
+			windowDuration: 200 * time.Millisecond,
+			pushInterval:   500 * time.Millisecond,
+			pushCount:      0,
+			expected:       [][]int{},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
+
+			errs := make(chan error, 10)
+			out := make(pipes.Pipes[[]int], 1)
+			out.Initialize(10)
+			defer out.Close()
+
+			if tc.assertPanics {
+				assert.Panics(t, func() {
+					newTumbling[int](ctx, out.Senders(), errs, tc.windowDuration)
+				}, "Expected panic when interval is less than or equal to 0")
+				return
+			}
+
+			w := newTumbling[int](ctx, out.Senders(), errs, tc.windowDuration)
+			assert.NotNil(t, w)
+
+		})
+	}
+}
+
+func TestTumblingWindow_Flush(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
@@ -19,7 +69,7 @@ func TestTumblingWindow_Publish(t *testing.T) {
 	out.Initialize(10)
 	defer out.Close()
 
-	// windowDuration = 200ms
+	// interval = 200ms
 	w := newTumbling[int](ctx, out.Senders(), errs, 200*time.Millisecond)
 
 	// push 8 items, one every 50ms → exactly two windows of 4 items each
@@ -31,59 +81,29 @@ func TestTumblingWindow_Publish(t *testing.T) {
 	}()
 
 	var results [][]int
+	expected := [][]int{{1, 2, 3, 4}, {5, 6, 7, 8}}
 	for {
 		select {
 		case v := <-out[0]:
 			results = append(results, v)
 		case <-ctx.Done():
-			assert.ElementsMatch(t, []int{10, 26}, results)
-			assert.Empty(t, errs)
+			for i, res := range results {
+				assert.ElementsMatch(t, expected[i], res)
+				assert.Empty(t, errs)
+			}
 			return
 		}
 	}
 }
 
-func TestTumblingWindow_ProcError(t *testing.T) {
-	// procFunc always errors
-	wantErr := errors.New("bad")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	errs := make(chan error, 10)
-	out := make(pipes.Pipes[[]int], 1)
-	out.Initialize(10)
-
-	w := newTumbling[int, int](ctx, out.Senders(), errs, 200*time.Millisecond)
-	// push 8 items, one every 50ms → exactly two windows of 4 items each
-	go func() {
-		defer out.Close()
-		for i := 1; i <= 8; i++ {
-			w.Push(i)
-			time.Sleep(50 * time.Millisecond)
-		}
-	}()
-
-	var results [][]int
-	for v := range out[0] {
-		results = append(results, v)
-	}
-
-	assert.Empty(t, results)
-	assert.Len(t, errs, 2)
-	assert.Equal(t, wantErr, <-errs)
-}
-
-func BenchmarkTumblingWindow(b *testing.B) {
-
+func BenchmarkTumbling(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	errs := make(chan error, 10)
 	out := make(pipes.Pipes[[]int], 1)
 	out.Initialize(10)
 
-	w := newTumbling[int, int](ctx, out.Senders(), errs, 200*time.Millisecond)
-
+	w := newTumbling[int](ctx, out.Senders(), errs, 200*time.Millisecond)
 	go func() {
 		for {
 			select {

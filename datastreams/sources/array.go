@@ -37,11 +37,9 @@ func (s *array[T]) Source(ctx context.Context, errSender chan<- error) datastrea
 			select {
 			case <-ctx.Done():
 				return
-			case outSender <- val:
-				if s.params.Throttle > 0 {
-					time.Sleep(s.params.Throttle)
-				}
-
+			default:
+				outSender <- val
+				time.Sleep(s.params.Throttle)
 			}
 		}
 	}(s.out)
