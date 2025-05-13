@@ -74,10 +74,21 @@ func TestTumblingWindow_Flush(t *testing.T) {
 
 	// push 8 items, one every 50ms → exactly two windows of 4 items each
 	go func() {
-		for i := 1; i <= 8; i++ {
+		for i := 1; i <= 4; i++ {
 			w.Push(i)
 			time.Sleep(50 * time.Millisecond)
 		}
+
+		// ensure we are out the way of the first window
+		time.Sleep(100 * time.Millisecond)
+
+		for i := 5; i <= 8; i++ {
+			w.Push(i)
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+		// No more items will be pushed
 	}()
 
 	var results [][]int
