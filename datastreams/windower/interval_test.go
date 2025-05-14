@@ -20,11 +20,6 @@ func TestNewInterval(t *testing.T) {
 			interval:    200 * time.Millisecond,
 			shouldPanic: false,
 		},
-		{
-			name:        "zero interval duration",
-			interval:    0,
-			shouldPanic: true,
-		},
 	}
 
 	for _, tc := range testcases {
@@ -37,14 +32,7 @@ func TestNewInterval(t *testing.T) {
 			out.Initialize(10)
 			defer out.Close()
 
-			if tc.shouldPanic {
-				assert.Panics(t, func() {
-					NewInterval[int](ctx, out.Senders(), errs, tc.interval)
-				}, "Expected panic when interval or slideInterval is less than or equal to 0")
-				return
-			}
-
-			i := NewInterval[int](ctx, out.Senders(), errs, tc.interval)
+			i := newInterval[int](ctx, out.Senders(), errs, tc.interval)
 			assert.NotNil(t, i)
 		})
 	}
@@ -85,7 +73,7 @@ func TestInterval_Flush(t *testing.T) {
 			out.Initialize(10)
 			defer out.Close()
 
-			w := NewInterval[int](ctx, out.Senders(), errs, tc.interval)
+			w := newInterval[int](ctx, out.Senders(), errs, tc.interval)
 
 			go func() {
 				for i := 1; i <= tc.pushCount; i++ {

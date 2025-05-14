@@ -11,11 +11,34 @@ import (
 	"github.com/elastiflow/pipelines/datastreams/windower"
 )
 
+func SlingWindowFunc(readings []*SensorReading) (*SensorInference, error) {
+	if len(readings) == 0 {
+		return nil, nil
+	}
+	var totalTemp, totalHumidity float64
+	for _, reading := range readings {
+		totalTemp += reading.Temp
+		totalHumidity += reading.Humidity
+	}
+	avgTemp := totalTemp / float64(len(readings))
+	avgHumidity := totalHumidity / float64(len(readings))
+	return &SensorInference{
+		DeviceID:    readings[0].DeviceID,
+		AvgTemp:     avgTemp,
+		AvgHumidity: avgHumidity,
+	}, nil
+}
+
 func Example_sliding() {
 	errChan := make(chan error, 10)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	partitionFactory, err := windower.NewSlidingFactory[*SensorReading](150*time.Millisecond, 50*time.Millisecond)
+	if err != nil {
+		slog.Error("failed to create partition factory: " + err.Error())
+		return
+	}
 	var sensorReadings = []*SensorReading{
 		{DeviceID: "device-1", Temp: 22.5, Humidity: 45.0, Timestamp: time.Now().Add(-6 * time.Second)},
 		{DeviceID: "device-1", Temp: 22.7, Humidity: 46.0, Timestamp: time.Now().Add(-5 * time.Second)},
@@ -35,27 +58,9 @@ func Example_sliding() {
 		keyFunc := func(i *SensorReading) string {
 			return i.DeviceID // Key by device ID
 		}
-		windowFunc := func(readings []*SensorReading) (*SensorInference, error) {
-			if len(readings) == 0 {
-				return nil, nil
-			}
-			var totalTemp, totalHumidity float64
-			for _, reading := range readings {
-				totalTemp += reading.Temp
-				totalHumidity += reading.Humidity
-			}
-			avgTemp := totalTemp / float64(len(readings))
-			avgHumidity := totalHumidity / float64(len(readings))
-			return &SensorInference{
-				DeviceID:    readings[0].DeviceID,
-				AvgTemp:     avgTemp,
-				AvgHumidity: avgHumidity,
-			}, nil
-		}
-		partitionFactory := windower.NewSlidingFactory[*SensorReading](150*time.Millisecond, 50*time.Millisecond)
 		return datastreams.Window[*SensorReading, string, *SensorInference](
 			datastreams.KeyBy[*SensorReading, string](p, keyFunc),
-			windowFunc,
+			SlingWindowFunc,
 			partitionFactory,
 			datastreams.Params{
 				BufferSize: 50,

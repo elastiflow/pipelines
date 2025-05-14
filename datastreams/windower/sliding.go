@@ -2,6 +2,7 @@ package windower
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -93,13 +94,6 @@ func newSliding[T any](
 	errs chan<- error,
 	windowDuration, slideInterval time.Duration,
 ) partition.Partition[T] {
-	if windowDuration <= 0 || slideInterval <= 0 {
-		panic("interval and slideInterval must be > 0")
-	}
-	if slideInterval > windowDuration {
-		panic("slideInterval cannot be larger than interval")
-	}
-
 	s := &sliding[T]{
 		Base:           partition.NewBase[T](out, errs),
 		windowDuration: windowDuration,
@@ -140,12 +134,20 @@ func (s *sliding[T]) run(ctx context.Context) {
 // NewSlidingFactory constructs a sliding window factory.
 func NewSlidingFactory[T any](
 	windowDuration, slideInterval time.Duration,
-) partition.Factory[T] {
+) (partition.Factory[T], error) {
+	if windowDuration <= 0 || slideInterval <= 0 {
+		return nil, errors.New("window duration and slide interval must be greater than 0")
+
+	}
+	if slideInterval > windowDuration {
+		return nil, errors.New("slide interval must be less than or equal to window duration")
+	}
+
 	return func(
 		ctx context.Context,
 		out pipes.Senders[[]T],
 		errs chan<- error,
 	) partition.Partition[T] {
 		return newSliding(ctx, out, errs, windowDuration, slideInterval)
-	}
+	}, nil
 }

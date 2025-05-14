@@ -2,6 +2,7 @@ package windower
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -45,9 +46,6 @@ func newTumbling[T any](
 	errs chan<- error,
 	windowDuration time.Duration,
 ) partition.Partition[T] {
-	if windowDuration <= 0 {
-		panic("interval must be > 0")
-	}
 
 	t := &tumbling[T]{
 		Base:           partition.NewBase[T](out, errs),
@@ -88,12 +86,15 @@ func (t *tumbling[T]) waitAndFlush() {
 // window duration.
 func NewTumblingFactory[T any](
 	windowDuration time.Duration,
-) partition.Factory[T] {
+) (partition.Factory[T], error) {
+	if windowDuration <= 0 {
+		return nil, errors.New("window duration must be greater than 0")
+	}
 	return func(
 		ctx context.Context,
 		out pipes.Senders[[]T],
 		errs chan<- error,
 	) partition.Partition[T] {
 		return newTumbling(ctx, out, errs, windowDuration)
-	}
+	}, nil
 }

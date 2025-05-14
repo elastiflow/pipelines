@@ -24,6 +24,24 @@ type SensorInference struct {
 	AvgHumidity float64
 }
 
+func TumblingWindowFunc(readings []*SensorReading) (*SensorInference, error) {
+	if len(readings) == 0 {
+		return nil, nil
+	}
+	var totalTemp, totalHumidity float64
+	for _, reading := range readings {
+		totalTemp += reading.Temp
+		totalHumidity += reading.Humidity
+	}
+	avgTemp := totalTemp / float64(len(readings))
+	avgHumidity := totalHumidity / float64(len(readings))
+	return &SensorInference{
+		DeviceID:    readings[0].DeviceID,
+		AvgTemp:     avgTemp,
+		AvgHumidity: avgHumidity,
+	}, nil
+}
+
 func Example_window() {
 	errChan := make(chan error, 10)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -39,6 +57,12 @@ func Example_window() {
 		{DeviceID: "device-2", Temp: 19.7, Humidity: 54.5, Timestamp: time.Now()},
 	}
 
+	partitionFactory, err := windower.NewTumblingFactory[*SensorReading](100 * time.Millisecond)
+	if err != nil {
+		slog.Error("failed to create partition factory: " + err.Error())
+		return
+	}
+
 	// Create a source with 10 integers
 	pl := pipelines.New[*SensorReading, *SensorInference](
 		ctx,
@@ -48,27 +72,9 @@ func Example_window() {
 		keyFunc := func(i *SensorReading) string {
 			return i.DeviceID // Key by device ID
 		}
-		windowFunc := func(readings []*SensorReading) (*SensorInference, error) {
-			if len(readings) == 0 {
-				return nil, nil
-			}
-			var totalTemp, totalHumidity float64
-			for _, reading := range readings {
-				totalTemp += reading.Temp
-				totalHumidity += reading.Humidity
-			}
-			avgTemp := totalTemp / float64(len(readings))
-			avgHumidity := totalHumidity / float64(len(readings))
-			return &SensorInference{
-				DeviceID:    readings[0].DeviceID,
-				AvgTemp:     avgTemp,
-				AvgHumidity: avgHumidity,
-			}, nil
-		}
-		partitionFactory := windower.NewTumblingFactory[*SensorReading](100 * time.Millisecond)
 		return datastreams.Window[*SensorReading, string, *SensorInference](
 			datastreams.KeyBy[*SensorReading, string](p, keyFunc),
-			windowFunc,
+			TumblingWindowFunc,
 			partitionFactory,
 			datastreams.Params{
 				BufferSize: 50,

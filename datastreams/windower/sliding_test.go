@@ -2,6 +2,7 @@ package windower
 
 import (
 	"context"
+	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 	"sync"
 	"testing"
 	"time"
@@ -10,59 +11,68 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewSliding(t *testing.T) {
+func TestNewSlidingFactory(t *testing.T) {
 	testcases := []struct {
 		name           string
 		windowDuration time.Duration
 		slideInterval  time.Duration
-		shouldPanic    bool
+		assertErr      func(t *testing.T, err error)
+		assert         func(t *testing.T, p partition.Factory[int])
 	}{
 		{
 			name:           "valid parameters",
 			windowDuration: 200 * time.Millisecond,
 			slideInterval:  50 * time.Millisecond,
-			shouldPanic:    false,
+			assertErr: func(t *testing.T, err error) {
+				assert.NoError(t, err)
+			},
+			assert: func(t *testing.T, p partition.Factory[int]) {
+				assert.NotNil(t, p)
+			},
 		},
 		{
-			name:           "zero window duration",
-			windowDuration: 0,
+			name:           "invalid window duration",
+			windowDuration: 0 * time.Millisecond,
 			slideInterval:  50 * time.Millisecond,
-			shouldPanic:    true,
+			assertErr: func(t *testing.T, err error) {
+				assert.Error(t, err)
+				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
+			},
+			assert: func(t *testing.T, p partition.Factory[int]) {
+				assert.Nil(t, p)
+			},
 		},
 		{
-			name:           "zero slide interval",
+			name:           "invalid slide interval",
 			windowDuration: 200 * time.Millisecond,
-			slideInterval:  0,
-			shouldPanic:    true,
+			slideInterval:  0 * time.Millisecond,
+			assertErr: func(t *testing.T, err error) {
+				assert.Error(t, err)
+				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
+			},
+			assert: func(t *testing.T, p partition.Factory[int]) {
+				assert.Nil(t, p)
+			},
 		},
 		{
-			name:           "negative window duration",
-			windowDuration: -100 * time.Millisecond,
-			slideInterval:  50 * time.Millisecond,
-			shouldPanic:    true,
+			name:           "invalid window duration and slide interval",
+			windowDuration: 0 * time.Millisecond,
+			slideInterval:  0 * time.Millisecond,
+			assertErr: func(t *testing.T, err error) {
+				assert.Error(t, err)
+				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
+			},
+			assert: func(t *testing.T, p partition.Factory[int]) {
+				assert.Nil(t, p)
+			},
 		},
 	}
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			defer cancel()
-
-			errs := make(chan error, 10)
-			out := make(pipes.Pipes[[]int], 1)
-			out.Initialize(10)
-			defer out.Close()
-
-			if tc.shouldPanic {
-				assert.Panics(t, func() {
-					newSliding[int](ctx, out.Senders(), errs, tc.windowDuration, tc.slideInterval)
-				}, "Expected panic when interval or slideInterval is less than or equal to 0")
-				return
-			}
-
-			s := newSliding[int](ctx, out.Senders(), errs, tc.windowDuration, tc.slideInterval)
-			assert.NotNil(t, s)
+			s, err := NewSlidingFactory[int](tc.windowDuration, tc.slideInterval)
+			tc.assertErr(t, err)
+			tc.assert(t, s)
 		})
 	}
 }
@@ -145,6 +155,43 @@ func TestSlidingBatch_next(t *testing.T) {
 
 			assert.Len(t, got, len(tt.want))
 			assert.ElementsMatch(t, got, tt.want, "unexpected result")
+		})
+	}
+}
+
+func Test_newSliding(t *testing.T) {
+	testcases := []struct {
+		name           string
+		windowDuration time.Duration
+		slideInterval  time.Duration
+		shouldPanic    bool
+		assert         func(t *testing.T, p partition.Partition[int])
+	}{
+		{
+			name:           "valid parameters",
+			windowDuration: 200 * time.Millisecond,
+			slideInterval:  50 * time.Millisecond,
+			shouldPanic:    false,
+			assert: func(t *testing.T, p partition.Partition[int]) {
+				assert.NotNil(t, p)
+				assert.IsType(t, &sliding[int]{}, p)
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
+
+			errs := make(chan error, 10)
+			out := make(pipes.Pipes[[]int], 1)
+			out.Initialize(10)
+			defer out.Close()
+
+			s := newSliding[int](ctx, out.Senders(), errs, tc.windowDuration, tc.slideInterval)
+			tc.assert(t, s)
 		})
 	}
 }

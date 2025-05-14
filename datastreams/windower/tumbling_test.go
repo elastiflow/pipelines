@@ -2,12 +2,44 @@ package windower
 
 import (
 	"context"
+	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 	"testing"
 	"time"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestNewTumblingFactory(t *testing.T) {
+	testcases := []struct {
+		name           string
+		windowDuration time.Duration
+		slideInterval  time.Duration
+		assertErr      func(t *testing.T, err error)
+		assert         func(t *testing.T, p partition.Factory[int])
+	}{
+		{
+			name:           "invalid window duration and slide interval",
+			windowDuration: 0 * time.Millisecond,
+			slideInterval:  0 * time.Millisecond,
+			assertErr: func(t *testing.T, err error) {
+				assert.Error(t, err)
+				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
+			},
+			assert: func(t *testing.T, p partition.Factory[int]) {
+				assert.Nil(t, p)
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := NewSlidingFactory[int](tc.windowDuration, tc.slideInterval)
+			tc.assertErr(t, err)
+			tc.assert(t, s)
+		})
+	}
+}
 
 func TestNewTumbling(t *testing.T) {
 	testcases := []struct {
@@ -18,14 +50,6 @@ func TestNewTumbling(t *testing.T) {
 		expected       [][]int
 		assertPanics   bool
 	}{
-		{
-			name:           "Invalid window duration",
-			windowDuration: 0 * time.Millisecond,
-			pushInterval:   500 * time.Millisecond,
-			pushCount:      8,
-			expected:       [][]int{{1, 2, 3, 4}, {5, 6, 7, 8}},
-			assertPanics:   true,
-		},
 		{
 			name:           "Valid window duration",
 			windowDuration: 200 * time.Millisecond,
@@ -45,13 +69,6 @@ func TestNewTumbling(t *testing.T) {
 			out := make(pipes.Pipes[[]int], 1)
 			out.Initialize(10)
 			defer out.Close()
-
-			if tc.assertPanics {
-				assert.Panics(t, func() {
-					newTumbling[int](ctx, out.Senders(), errs, tc.windowDuration)
-				}, "Expected panic when interval is less than or equal to 0")
-				return
-			}
 
 			w := newTumbling[int](ctx, out.Senders(), errs, tc.windowDuration)
 			assert.NotNil(t, w)
