@@ -2,10 +2,11 @@ package windower
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"github.com/stretchr/testify/assert"

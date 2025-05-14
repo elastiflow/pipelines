@@ -84,7 +84,6 @@ type sliding[T any] struct {
 	windowDuration time.Duration
 	slideInterval  time.Duration
 	sb             *slidingBatch[T]
-	bufferPool     *sync.Pool
 }
 
 // newSliding constructs a sliding window partition that starts ticking immediately.
@@ -122,11 +121,9 @@ func (s *sliding[T]) run(ctx context.Context) {
 			}
 			return
 		case now := <-ticker.C:
-			next := s.sb.next(s.windowDuration, now, false)
-			if len(next) == 0 {
-				continue
+			if next := s.sb.next(s.windowDuration, now, false); len(next) > 0 {
+				s.Flush(ctx, next)
 			}
-			s.Flush(ctx, next)
 		}
 	}
 }
