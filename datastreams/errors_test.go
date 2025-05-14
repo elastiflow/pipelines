@@ -287,3 +287,53 @@ func TestIsExpandError(t *testing.T) {
 		})
 	}
 }
+
+func TestIsKeyByError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "should return true for KEY_BY error",
+			err:  newKeyByError("segment", errors.New("error")),
+			want: true,
+		},
+		{
+			name: "should return false for non-KEY_BY error",
+			err:  errors.New("some other error"),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsKeyByError(tt.err)
+			assert.Equalf(t, got, tt.want, "IsKeyByError() = %v, want %v", got, tt.want)
+		})
+	}
+}
+
+func TestIsWindowError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "should return true for WINDOW error",
+			err:  newWindowError("segment", errors.New("error")),
+			want: true,
+		},
+		{
+			name: "should return false for non-WINDOW error",
+			err:  errors.New("some other error"),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsWindowError(tt.err)
+			assert.Equalf(t, got, tt.want, "IsWindowError() = %v, want %v", got, tt.want)
+		})
+	}
+}

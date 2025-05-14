@@ -77,6 +77,14 @@ func newExpandError(segment string, err error) error {
 	return newError(EXPAND, segment, err.Error())
 }
 
+func newKeyByError(segment string, err error) error {
+	return newError(KEY_BY, segment, err.Error())
+}
+
+func newWindowError(segment string, err error) error {
+	return newError(WINDOW, segment, err.Error())
+}
+
 func isError(err error, code ErrorCode) bool {
 	return strings.Contains(
 		err.Error(),
@@ -110,4 +118,16 @@ func IsExpandError(err error) bool {
 
 func IsSinkError(err error) bool {
 	return isError(err, SINK)
+}
+
+// IsKeyByError checks if the given error is a KEY_BY error.
+// It returns true if the error is a KEY_BY error, otherwise false.
+func IsKeyByError(err error) bool {
+	return isError(err, KEY_BY)
+}
+
+// IsWindowError checks if the given error is a WINDOW error.
+// It returns true if the error is a WINDOW error, otherwise false.
+func IsWindowError(err error) bool {
+	return isError(err, WINDOW)
 }

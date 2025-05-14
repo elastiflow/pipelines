@@ -15,6 +15,11 @@ type ExpandFunc[T any, U any] func(T) ([]U, error)
 // This function type is used to filter a given input type
 type FilterFunc[T any] func(T) (bool, error)
 
+// KeyFunc is a user defined function that takes a value of type T and returns a key of type K
+// for the given value. This function is used to partition pipeline data streams by key.
 type KeyFunc[T any, K comparable] func(T) K
 
+// WindowFunc processes a given batch of data and returns a result. You can use this
+// function in conjunction with the KeyedDataStream to perform windowed operations on  batches
+// of data with a given key.
 type WindowFunc[T any, R any] func([]T) (R, error)
