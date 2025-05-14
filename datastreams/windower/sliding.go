@@ -2,6 +2,7 @@ package windower
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -44,10 +45,9 @@ func (s *slidingBatch[T]) next(
 
 	s.mu.Lock()
 	// find cut index via binary search
-	cut := 0
-	for cut < len(s.items) && s.items[cut].ts.Before(threshold) {
-		cut++
-	}
+	cut := sort.Search(len(s.items), func(i int) bool {
+		return !s.items[i].ts.Before(threshold)
+	})
 	if cut > 0 {
 		// reallocate so we don't hold old large backing arrays
 		tail := s.items[cut:]
@@ -83,6 +83,7 @@ type sliding[T any] struct {
 	windowDuration time.Duration
 	slideInterval  time.Duration
 	sb             *slidingBatch[T]
+	bufferPool     *sync.Pool
 }
 
 // newSliding constructs a sliding window partition that starts ticking immediately.
@@ -122,13 +123,10 @@ func (s *sliding[T]) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			// final, non‑overlapping flush
-			next := s.sb.next(s.windowDuration, time.Now(), true)
-			if len(next) == 0 {
-				continue
+			if next := s.sb.next(s.windowDuration, time.Now(), true); len(next) > 0 {
+				s.Flush(ctx, next)
 			}
-			s.Flush(ctx, next)
-
+			return
 		case now := <-ticker.C:
 			next := s.sb.next(s.windowDuration, now, false)
 			if len(next) == 0 {

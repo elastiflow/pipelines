@@ -2,7 +2,7 @@ package windower
 
 import (
 	"context"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
@@ -10,26 +10,21 @@ import (
 )
 
 type status struct {
-	started bool
-	mu      sync.Mutex
+	started atomic.Bool
 }
 
 func newStatus() *status {
 	return &status{
-		started: false,
+		started: atomic.Bool{},
 	}
 }
 
-func (t *status) running() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.started
+func (s *status) tryStop() bool {
+	return s.started.CompareAndSwap(true, false)
 }
 
-func (t *status) set(state bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.started = state
+func (s *status) tryStart() bool {
+	return s.started.CompareAndSwap(false, true)
 }
 
 // tumbling buffers items for windowDuration once the first item arrives.
@@ -67,8 +62,7 @@ func newTumbling[T any](
 func (t *tumbling[T]) Push(item T) {
 	t.Base.Push(item)
 
-	if !t.status.running() {
-		t.status.set(true)
+	if t.status.tryStart() {
 		go t.waitAndFlush()
 	}
 }
@@ -80,10 +74,11 @@ func (t *tumbling[T]) waitAndFlush() {
 
 	select {
 	case <-t.ctx.Done():
+		t.status.tryStop()
 		return
 	case <-timer.C:
 		t.Base.FlushNext(t.ctx)
-		t.status.set(false)
+		t.status.tryStop()
 	}
 }
 
