@@ -3,6 +3,8 @@ package datastreams
 import (
 	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewError(t *testing.T) {
@@ -48,13 +50,25 @@ func TestNewError(t *testing.T) {
 			msg:     "expand error",
 			want:    "datastream EXPAND error (code: 4 segment: segment5, message: expand error)",
 		},
+		{
+			name:    "should create an EXPAND error",
+			code:    KEY_BY,
+			segment: "segment5",
+			msg:     "key by error",
+			want:    "datastream KEY_BY error (code: 5 segment: segment5, message: key by error)",
+		},
+		{
+			name:    "should create an EXPAND error",
+			code:    WINDOW,
+			segment: "segment5",
+			msg:     "window error",
+			want:    "datastream WINDOW error (code: 6 segment: segment5, message: window error)",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := newError(tt.code, tt.segment, tt.msg)
-			if err.Error() != tt.want {
-				t.Errorf("newError() = %v, want %v", err.Error(), tt.want)
-			}
+			assert.ErrorContains(t, err, tt.want, "error message should match")
 		})
 	}
 }
@@ -76,9 +90,8 @@ func TestNewRunError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := newRunError(tt.segment, tt.err)
-			if err.Error() != tt.want {
-				t.Errorf("newRunError() = %v, want %v", err.Error(), tt.want)
-			}
+			assert.ErrorContains(t, err, tt.want, "error message should match")
+
 		})
 	}
 }
@@ -100,9 +113,7 @@ func TestNewFilterError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := newFilterError(tt.segment, tt.err)
-			if err.Error() != tt.want {
-				t.Errorf("newFilterError() = %v, want %v", err.Error(), tt.want)
-			}
+			assert.ErrorContains(t, err, tt.want, "error message should match")
 		})
 	}
 }
@@ -124,9 +135,7 @@ func TestNewMapError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := newMapError(tt.segment, tt.err)
-			if err.Error() != tt.want {
-				t.Errorf("newMapError() = %v, want %v", err.Error(), tt.want)
-			}
+			assert.ErrorContains(t, err, tt.want, "error message should match")
 		})
 	}
 }
@@ -148,9 +157,8 @@ func TestNewSinkError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := newSinkError(tt.segment, tt.err)
-			if err.Error() != tt.want {
-				t.Errorf("newSinkError() = %v, want %v", err.Error(), tt.want)
-			}
+			assert.ErrorContains(t, err, tt.want, "error message should match")
+
 		})
 	}
 }
@@ -174,9 +182,8 @@ func TestIsRunError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsRunError(tt.err); got != tt.want {
-				t.Errorf("IsRunError() = %v, want %v", got, tt.want)
-			}
+			got := IsRunError(tt.err)
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }
@@ -200,9 +207,8 @@ func TestIsFilterError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsFilterError(tt.err); got != tt.want {
-				t.Errorf("IsFilterError() = %v, want %v", got, tt.want)
-			}
+			got := IsFilterError(tt.err)
+			assert.Equalf(t, got, tt.want, "IsFilterError() = %v, want %v", got, tt.want)
 		})
 	}
 }
@@ -226,9 +232,8 @@ func TestIsMapError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsMapError(tt.err); got != tt.want {
-				t.Errorf("IsMapError() = %v, want %v", got, tt.want)
-			}
+			got := IsMapError(tt.err)
+			assert.Equalf(t, got, tt.want, "IsMapError() = %v, want %v", got, tt.want)
 		})
 	}
 }
@@ -252,9 +257,8 @@ func TestIsSinkError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsSinkError(tt.err); got != tt.want {
-				t.Errorf("IsSinkError() = %v, want %v", got, tt.want)
-			}
+			got := IsSinkError(tt.err)
+			assert.Equalf(t, got, tt.want, "IsSinkError() = %v, want %v", got, tt.want)
 		})
 	}
 }
@@ -278,9 +282,58 @@ func TestIsExpandError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsExpandError(tt.err); got != tt.want {
-				t.Errorf("IsExpandError() = %v, want %v", got, tt.want)
-			}
+			got := IsExpandError(tt.err)
+			assert.Equalf(t, got, tt.want, "IsExpandError() = %v, want %v", got, tt.want)
+		})
+	}
+}
+
+func TestIsKeyByError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "should return true for KEY_BY error",
+			err:  newKeyByError("segment", errors.New("error")),
+			want: true,
+		},
+		{
+			name: "should return false for non-KEY_BY error",
+			err:  errors.New("some other error"),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsKeyByError(tt.err)
+			assert.Equalf(t, got, tt.want, "IsKeyByError() = %v, want %v", got, tt.want)
+		})
+	}
+}
+
+func TestIsWindowError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "should return true for WINDOW error",
+			err:  newWindowError("segment", errors.New("error")),
+			want: true,
+		},
+		{
+			name: "should return false for non-WINDOW error",
+			err:  errors.New("some other error"),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsWindowError(tt.err)
+			assert.Equalf(t, got, tt.want, "IsWindowError() = %v, want %v", got, tt.want)
 		})
 	}
 }

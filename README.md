@@ -86,6 +86,37 @@ For instance:
         return i % 2 == 0, nil
     })
     ```
+  
+
+**KeyByFunc**: A user-defined function type used to partition the data stream into different segments based on a key. This is useful for grouping data before applying transformations or aggregations.
+For instance:
+```go
+    kds := ds.KeyBy[testStruct, int](
+        New[testStruct](ctx, input, errCh).WithWaitGroup(&sync.WaitGroup{}),
+        func(i int) (int, error) {
+            return i % 2, nil
+        },
+        Params{
+            BufferSize: 50,
+            Num:        1, // only 1 output channel per key
+        },
+    )
+```
+
+**WindowFunc**: A user-defined function to process batched data in a window. This is useful for aggregating data over time or count-based windows.
+For instance:
+```go
+    kds = ds.Window[testStruct, string, *testInference](
+        datastreams.KeyBy[*SensorReading, string](p, keyFunc),
+        TumblingWindowFunc,
+        partitionFactory,
+        datastreams.Params{
+            BufferSize: 50,
+        },
+    )
+```
+
+
 
 #### Sources
 - **FromArray([]T)**: Convert a Go slice/array into a Sourcer
@@ -94,6 +125,14 @@ For instance:
 
 #### Sinks
 - **ToChannel(chan<- T)**: Write DataStream output into a channel
+
+#### Windows
+Window performs time- or count-based aggregation on a partitioned stream.
+- **NewTumblingFactory[T]**: Creates fixed-size windows that do not overlap.
+- **NewSlidingFactory[T]**: Creates overlapping windows.
+- **NewIntervalFactory[T]**: Creates windows based on a time interval.
+
+
   
 #### Methods
 - **Run(ProcessFunc[T]) DataStream[T]**: Process each item with a user function

@@ -15,38 +15,11 @@ type ExpandFunc[T any, U any] func(T) ([]U, error)
 // This function type is used to filter a given input type
 type FilterFunc[T any] func(T) (bool, error)
 
-type receivers[T any] []<-chan T
-type senders[T any] []chan<- T
-type pipes[T any] []chan T
+// KeyFunc is a user defined function that takes a value of type T and returns a key of type K
+// for the given value. This function is used to partition pipeline data streams by key.
+type KeyFunc[T any, K comparable] func(T) K
 
-func (c pipes[T]) Initialize(buffer int) {
-	for i := range len(c) {
-		if buffer > 0 {
-			c[i] = make(chan T, buffer)
-			continue
-		}
-		c[i] = make(chan T)
-	}
-}
-
-func (c pipes[T]) Close() {
-	for i := range len(c) {
-		close(c[i])
-	}
-}
-
-func (c pipes[T]) Senders() senders[T] {
-	s := make(senders[T], len(c))
-	for i := range c {
-		s[i] = c[i]
-	}
-	return s
-}
-
-func (c pipes[T]) Receivers() receivers[T] {
-	s := make(receivers[T], len(c))
-	for i := range c {
-		s[i] = c[i]
-	}
-	return s
-}
+// WindowFunc processes a given batch of data and returns a result. You can use this
+// function in conjunction with the KeyedDataStream to perform windowed operations on  batches
+// of data with a given key.
+type WindowFunc[T any, R any] func([]T) (R, error)
