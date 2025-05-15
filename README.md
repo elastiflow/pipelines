@@ -1,4 +1,10 @@
-# Pipelines
+[![Pipelines logo](docs/img/pipelines.png)](#)
+
+[![Go checks](https://github.com/elastiflow/pipelines/actions/workflows/go_checks.yml/badge.svg)](https://github.com/elastiflow/pipelines/actions/workflows/go_checks.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/elastiflow/pipelines.svg)](https://pkg.go.dev/github.com/elastiflow/pipelines)
+[![Go Report Card](https://goreportcard.com/badge/github.com/elastiflow/pipelines)](https://goreportcard.com/report/github.com/elastiflow/pipelines)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=elastiflow_pipelines&metric=coverage&token=ccd0571925ac27b1722b132131ef8a3906b93277)](https://sonarcloud.io/summary/new_code?id=elastiflow_pipelines)
+---
 
 The `pipelines` module is a Go library designed to facilitate the creation and management of:
 
@@ -86,7 +92,6 @@ For instance:
         return i % 2 == 0, nil
     })
     ```
-  
 
 **KeyByFunc**: A user-defined function type used to partition the data stream into different segments based on a key. This is useful for grouping data before applying transformations or aggregations.
 For instance:
@@ -116,8 +121,6 @@ For instance:
     )
 ```
 
-
-
 #### Sources
 - **FromArray([]T)**: Convert a Go slice/array into a Sourcer
 - **FromChannel(<-chan T)**: Convert an existing channel into a Sourcer
@@ -131,13 +134,14 @@ Window performs time- or count-based aggregation on a partitioned stream.
 - **NewTumblingFactory[T]**: Creates fixed-size windows that do not overlap.
 - **NewSlidingFactory[T]**: Creates overlapping windows.
 - **NewIntervalFactory[T]**: Creates windows based on a time interval.
-
-
   
 #### Methods
 - **Run(ProcessFunc[T]) DataStream[T]**: Process each item with a user function
 - **Filter(FilterFunc[T]) DataStream[T]**: Filter items by user-defined condition
 - **Map(TransformFunc[T,U]) DataStream[U]**: Transform each item from T to U
+- **KeyBy(KeyByFunc[T]) DataStream[T]**: Partition the stream by a key
+- **Window(WindowFunc[T]) DataStream[T]**: Apply a window function to the stream
+- **Expand(ExpandFunc[T]) DataStream[T]**: Explode each item into multiple items
 - **FanOut() DataStream[T]**: Create multiple parallel output channels
 - **FanIn() DataStream[T]**: Merge multiple channels into one
 - **Broadcast() DataStream[T]**: Duplicate each item to multiple outputs
