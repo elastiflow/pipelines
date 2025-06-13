@@ -2,6 +2,7 @@ package sinks
 
 import (
 	"context"
+
 	"github.com/elastiflow/pipelines/datastreams"
 )
 
