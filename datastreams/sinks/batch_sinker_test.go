@@ -26,7 +26,7 @@ func TestNewSinker(t *testing.T) {
 	errs := make(chan error, 1)
 	batchSize := 10
 
-	sinker := NewSinker(mockFlushFunc, batchSize, errs)
+	sinker := NewBatchSinker(mockFlushFunc, batchSize, errs)
 
 	require.NotNil(t, sinker)
 	assert.NotNil(t, sinker.onFlush)
@@ -71,7 +71,7 @@ func TestBatchSinker_Sink(t *testing.T) {
 			flusher := &mockFlusher[int]{}
 			errChan := make(chan error, 1)
 			flusher.On("onFlush", mock.Anything).Return(nil)
-			sinker := NewSinker(flusher.onFlush, tc.batchSize, errChan)
+			sinker := NewBatchSinker(flusher.onFlush, tc.batchSize, errChan)
 			sinker.batch = make([]int, 0, tc.batchSize)
 
 			inChan := make(chan int, len(tc.input))

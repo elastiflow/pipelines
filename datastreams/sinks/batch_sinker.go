@@ -11,7 +11,7 @@ type BatchSinker[T any] struct {
 	errs    chan error
 }
 
-func NewSinker[T any](onFlush func(context.Context, []T) error, batchSize int, errs chan error) *BatchSinker[T] {
+func NewBatchSinker[T any](onFlush func(context.Context, []T) error, batchSize int, errs chan error) *BatchSinker[T] {
 	return &BatchSinker[T]{
 		onFlush: onFlush,
 		batch:   make([]T, 0, batchSize),
