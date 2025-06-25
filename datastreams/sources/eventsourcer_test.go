@@ -38,7 +38,7 @@ func TestNewEventSourcer(t *testing.T) {
 	assert.NotNil(t, sourcer)
 }
 
-func TestKafkaSourcer_Source(t *testing.T) {
+func TestEventSourcer_Source(t *testing.T) {
 	t.Parallel()
 	messageConsumer := &MockConsumer[int]{}
 	messages := make(chan int, 64)
@@ -59,7 +59,7 @@ func TestKafkaSourcer_Source(t *testing.T) {
 	messageConsumer.AssertExpectations(t)
 }
 
-func TestKafkaSourcer_MarkSuccess(t *testing.T) {
+func TestEventSourcer_MarkSuccess(t *testing.T) {
 	t.Parallel()
 	messageConsumer := &MockConsumer[int]{}
 	messageConsumer.On("MarkSuccess", 56).Return()
@@ -72,7 +72,7 @@ func TestKafkaSourcer_MarkSuccess(t *testing.T) {
 	messageConsumer.AssertExpectations(t)
 }
 
-func TestKafkaSourcer_MarkError(t *testing.T) {
+func TestEventSourcer_MarkError(t *testing.T) {
 	t.Parallel()
 	messageConsumer := &MockConsumer[int]{}
 	messageConsumer.On("MarkError", 0, errors.New("some error")).Return()

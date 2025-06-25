@@ -2,11 +2,12 @@ package sinks
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"testing"
-	"time"
 )
 
 type mockEventProducer[T any] struct {

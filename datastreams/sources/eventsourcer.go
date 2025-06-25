@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+
 	"github.com/elastiflow/pipelines/datastreams"
 )
 
@@ -28,7 +29,7 @@ type EventConsumer[T any] interface {
 	Runner
 }
 
-type KafkaSourcer[T any] struct {
+type EventSourcer[T any] struct {
 	consumer   EventConsumer[T]
 	streamSize int
 }
@@ -36,14 +37,14 @@ type KafkaSourcer[T any] struct {
 func NewEventSourcer[T any](
 	streamSize int,
 	eventConsumer EventConsumer[T],
-) *KafkaSourcer[T] {
-	return &KafkaSourcer[T]{
+) *EventSourcer[T] {
+	return &EventSourcer[T]{
 		streamSize: streamSize,
 		consumer:   eventConsumer,
 	}
 }
 
-func (k *KafkaSourcer[T]) Source(ctx context.Context, errSender chan<- error) datastreams.DataStream[T] {
+func (k *EventSourcer[T]) Source(ctx context.Context, errSender chan<- error) datastreams.DataStream[T] {
 	out := make(chan T, k.streamSize)
 	go k.consumer.Run(ctx)
 	go func(ctx context.Context, msgStream <-chan T, outStream chan<- T) {
@@ -60,10 +61,10 @@ func (k *KafkaSourcer[T]) Source(ctx context.Context, errSender chan<- error) da
 	return datastreams.New[T](ctx, out, errSender)
 }
 
-func (k *KafkaSourcer[T]) MarkSuccess(msg T) {
+func (k *EventSourcer[T]) MarkSuccess(msg T) {
 	k.consumer.MarkSuccess(msg)
 }
 
-func (k *KafkaSourcer[T]) MarkError(msg T, err error) {
+func (k *EventSourcer[T]) MarkError(msg T, err error) {
 	k.consumer.MarkError(msg, err)
 }
