@@ -23,3 +23,6 @@ type KeyFunc[T any, K comparable] func(T) K
 // function in conjunction with the KeyedDataStream to perform windowed operations on  batches
 // of data with a given key.
 type WindowFunc[T any, R any] func([]T) (R, error)
+
+// JoinFunc merges a left + right element into a single result.
+type JoinFunc[T any, U any, R any] func(T, U) (R, error)

@@ -3,6 +3,7 @@ package datastreams
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
@@ -433,6 +434,114 @@ func Expand[T any, U any](
 	return nextPipe
 }
 
+func Join[T any, U any, K comparable, R any](
+	left KeyedDataStream[T, K],
+	right KeyedDataStream[U, K],
+	jf JoinFunc[T, U, R],
+	opts ...Params,
+) DataStream[R] {
+	p := applyParams(opts...)
+	outStream, outChans := next[R](standard, p, 1, left.ctx, left.errStream, left.wg)
+	out := outChans[0]
+
+	var (
+		mu       sync.Mutex
+		leftBuf  = make(map[K][]timed[T])
+		rightBuf = make(map[K][]timed[U])
+		now      = time.Now
+	)
+
+	emit := func(l T, r U) {
+		res, err := jf(l, r)
+		if err != nil {
+			select {
+			case left.errStream <- err:
+			default:
+			}
+			return
+		}
+		select {
+		case out <- res:
+		case <-left.ctx.Done():
+		}
+	}
+
+	joinCtx, cancel := context.WithCancel(left.ctx)
+	go func() {
+		<-right.ctx.Done()
+		cancel()
+	}()
+
+	var wg sync.WaitGroup
+
+	for _, in := range left.inStreams {
+		left.incrementWaitGroup(1)
+		wg.Add(1)
+		go func(ch <-chan T) {
+			defer wg.Done()
+			defer left.decrementWaitGroup()
+			for {
+				select {
+				case <-joinCtx.Done():
+					return
+				case v, ok := <-ch:
+					if !ok {
+						return
+					}
+					k := left.keyFunc(v)
+
+					mu.Lock()
+					leftBuf[k] = append(leftBuf[k], timed[T]{val: v, ts: now()})
+					if rights, ok := rightBuf[k]; ok {
+						for _, r := range rights {
+							emit(v, r.val)
+						}
+					}
+					evictBuffer(leftBuf, k, p.TTL, p.MaxBufferedPerKey, p.SlicePool, now)
+					mu.Unlock()
+				}
+			}
+		}(in)
+	}
+
+	for _, in := range right.inStreams {
+		right.incrementWaitGroup(1)
+		wg.Add(1)
+		go func(ch <-chan U) {
+			defer wg.Done()
+			defer right.decrementWaitGroup()
+			for {
+				select {
+				case <-joinCtx.Done():
+					return
+				case v, ok := <-ch:
+					if !ok {
+						return
+					}
+					k := right.keyFunc(v)
+
+					mu.Lock()
+					rightBuf[k] = append(rightBuf[k], timed[U]{val: v, ts: now()})
+					if lefts, ok := leftBuf[k]; ok {
+						for _, l := range lefts {
+							emit(l.val, v)
+						}
+					}
+					evictBuffer(rightBuf, k, p.TTL, p.MaxBufferedPerKey, p.SlicePool, now)
+					mu.Unlock()
+				}
+			}
+		}(in)
+	}
+
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return outStream
+}
+
 func next[T any](
 	pipeType pipeType,
 	params Params,
@@ -485,10 +594,82 @@ func orDone[T any](
 	return valStream
 }
 
-func applyParams(params ...Params) Params {
-	var p Params
-	for _, param := range params {
-		p = param
+// timestamped is a small constraint: any value that can expose its event time.
+type timestamped interface {
+	EventTime() time.Time
+}
+
+// evictBuffer removes elements that violate TTL or MaxBufferedPerKey.
+// It is zero-allocation (in-place filter) and optionally recycles the
+// backing slice through a *sync.Pool.
+func evictBuffer[K comparable, V timestamped](
+	buf map[K][]V,
+	key K,
+	ttl time.Duration,
+	max int,
+	pool *sync.Pool,
+	nowFn func() time.Time,
+) {
+	if ttl == 0 && max == 0 {
+		return // nothing to do
+	}
+	entries, ok := buf[key]
+	if !ok {
+		return
+	}
+
+	var keep []V
+	expireBefore := nowFn().Add(-ttl)
+
+	// ---------- time-based & count-based filtering ----------
+	for _, e := range entries {
+		if ttl > 0 && e.EventTime().Before(expireBefore) {
+			continue // too old
+		}
+		keep = append(keep, e)
+		if max > 0 && len(keep) >= max {
+			// Hit the per-key cap; stop retaining more.
+			break
+		}
+	}
+
+	// ---------- slice recycling / final write-back ----------
+	if len(keep) == 0 {
+		if pool != nil {
+			pool.Put(entries[:cap(entries)])
+		}
+		delete(buf, key)
+		return
+	}
+	buf[key] = keep
+}
+
+func applyParams(opts ...Params) Params {
+	p := Params{
+		BufferSize:        128,
+		MaxBufferedPerKey: 0,
+		TTL:               0,
+	}
+	for _, o := range opts {
+		if o.BufferSize != 0 {
+			p.BufferSize = o.BufferSize
+		}
+		if o.MaxBufferedPerKey != 0 {
+			p.MaxBufferedPerKey = o.MaxBufferedPerKey
+		}
+		if o.TTL != 0 {
+			p.TTL = o.TTL
+		}
+		if o.SlicePool != nil {
+			p.SlicePool = o.SlicePool
+		}
 	}
 	return p
 }
+
+type timed[T any] struct {
+	val T
+	ts  time.Time
+}
+
+func (t timed[T]) EventTime() time.Time { return t.ts }
