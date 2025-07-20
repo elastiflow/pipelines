@@ -211,6 +211,24 @@ func (p *Pipeline[T, U]) ToSource() datastreams.Sourcer[U] {
 	return sources.FromDataStream[U](p.sinkDS)
 }
 
+// Broadcast creates multiple copies of the pipeline's source DataStream,
+// allowing the same data to be processed in parallel by multiple downstream stages.
+func (p *Pipeline[T, U]) Broadcast(num int) []*Pipeline[T, U] {
+	next := p.sourceDS.Broadcast(datastreams.Params{
+		Num: num,
+	})
+	out := make([]*Pipeline[T, U], num)
+	for i := 0; i < num; i++ {
+		out[i] = New[T, U](
+			p.ctx,
+			sources.FromDataStream[T](next.Listen(i)),
+			p.errorChan,
+		)
+	}
+
+	return out
+}
+
 // Wait blocks until the pipeline's source has consumed all messages or the context
 // is canceled.
 //
