@@ -6,10 +6,10 @@ import (
 	"github.com/elastiflow/pipelines"
 	"github.com/elastiflow/pipelines/datastreams/sinks"
 	"log"
+	"sync"
 
 	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/elastiflow/pipelines/datastreams/sources"
-	"golang.org/x/sync/errgroup"
 )
 
 type listenerOutput struct {
@@ -19,9 +19,15 @@ type listenerOutput struct {
 
 func ExamplePipeline_Broadcast() {
 	log.Println("🚀 Starting Listen example...")
-	g, ctx := errgroup.WithContext(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	stdoutChan := make(chan listenerOutput, 10)
+	wg := &sync.WaitGroup{}
+	wg.Add(3)
+	errs := make(chan error, 10)
 	go func() {
+		defer wg.Done()
 		for msg := range stdoutChan {
 			log.Printf("[Listener %d] Received: %s", msg.Index, msg.Message)
 		}
@@ -39,8 +45,8 @@ func ExamplePipeline_Broadcast() {
 	).Broadcast(3)
 
 	// 4. Start the pipeline with a listener that processes each stream.
-	g.Go(func() error {
-		return pls[0].Start(func(p datastreams.DataStream[int]) datastreams.DataStream[listenerOutput] {
+	go func() {
+		err := pls[0].Start(func(p datastreams.DataStream[int]) datastreams.DataStream[listenerOutput] {
 			return datastreams.Map[int, listenerOutput](
 				p.OrDone().FanOut(
 					datastreams.Params{Num: 2},
@@ -58,10 +64,13 @@ func ExamplePipeline_Broadcast() {
 			)
 
 		}).Sink(sinks.ToChannel[listenerOutput](stdoutChan))
-	})
+		if err != nil {
+			errs <- err
+		}
+	}()
 
-	g.Go(func() error {
-		return pls[1].Start(func(p datastreams.DataStream[int]) datastreams.DataStream[listenerOutput] {
+	go func() {
+		err := pls[1].Start(func(p datastreams.DataStream[int]) datastreams.DataStream[listenerOutput] {
 			return datastreams.Map[int, listenerOutput](
 				p.OrDone().FanOut(
 					datastreams.Params{Num: 2},
@@ -79,10 +88,13 @@ func ExamplePipeline_Broadcast() {
 			)
 
 		}).Sink(sinks.ToChannel[listenerOutput](stdoutChan))
-	})
+		if err != nil {
+			errs <- err
+		}
+	}()
 
-	g.Go(func() error {
-		return pls[2].Start(func(p datastreams.DataStream[int]) datastreams.DataStream[listenerOutput] {
+	go func() {
+		err := pls[2].Start(func(p datastreams.DataStream[int]) datastreams.DataStream[listenerOutput] {
 			return datastreams.Map[int, listenerOutput](
 				p.OrDone().FanOut(
 					datastreams.Params{Num: 2},
@@ -100,12 +112,17 @@ func ExamplePipeline_Broadcast() {
 			)
 
 		}).Sink(sinks.ToChannel[listenerOutput](stdoutChan))
-	})
+		if err != nil {
+			errs <- err
+		}
+	}()
 
-	// 5. Wait for all processing to finish.
-	if err := g.Wait(); err != nil {
-		log.Fatalf("Error in pipeline: %v", err)
-	}
+	go func() {
+		for e := range errs {
+			log.Println(fmt.Errorf("error in pipeline: %w", e))
+		}
+	}()
 
+	wg.Wait()
 	log.Println("✅ Listen example finished successfully.")
 }

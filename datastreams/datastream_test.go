@@ -1084,7 +1084,7 @@ func TestDataStream_Listen(t *testing.T) {
 			ds.Broadcast(Params{Num: 3})
 
 			got := []int{}
-			for val := range ds.inStreams[] {
+			for val := range ds.inStreams {
 				got = append(got, val)
 			}
 
