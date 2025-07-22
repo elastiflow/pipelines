@@ -38,7 +38,7 @@ func ExampleFromArray() {
 
 	// 4. Build and run the pipeline.
 	err := pipelines.New[string, string](ctx, sourcer, nil). // No error channel needed for this simple case.
-		Start(func(p datastreams.DataStream[string]) datastreams.DataStream[string] {
+									Start(func(p datastreams.DataStream[string]) datastreams.DataStream[string] {
 			// The processing stage converts each string to uppercase.
 			return datastreams.Map(p, func(s string) (string, error) {
 				return strings.ToUpper(s), nil
