@@ -2,7 +2,6 @@ package pipelines_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -58,7 +57,7 @@ func (m *mockEventConsumer) MarkError(msg int, err error) {
 	log.Printf("❌ ERROR: Message '%d' failed processing and was marked with error: %v\n", msg, err)
 }
 
-func main() {
+func ExampleNewEventSourcer() {
 	log.Println("🚀 Starting EventSourcer example pipeline...")
 
 	// 1. Set up a context for graceful shutdown.
@@ -109,7 +108,7 @@ func main() {
 					return fmt.Sprintf("Processed even number: %d", i), nil
 				}
 				// Simulate an error for odd numbers.
-				return "", errors.New(fmt.Sprintf("Error processing odd number: %d", i))
+				return "", fmt.Errorf("error processing odd number: %d", i)
 			},
 		)
 	}).Sink(sinker)
