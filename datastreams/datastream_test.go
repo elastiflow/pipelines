@@ -1070,21 +1070,32 @@ func TestDataStream_Listen(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			start := make(chan int, 10)
+			first := make(chan int, 10)
+			second := make(chan int, 10)
+			third := make(chan int, 10)
+			listenedIndex := 1
 			for _, val := range tt.input {
-				start <- val
+				second <- val
 			}
-			close(start)
+
+			for i := 0; i < 10; i++ {
+				first <- i + 10 // Just some different values for first channel
+				third <- i + 20 // Just some different values for third channel
+			}
+
+			close(first)
+			close(second)
+			close(third)
 			ds := DataStream[int]{
 				ctx:       ctx,
 				errStream: make(chan<- error),
-				inStreams: []<-chan int{start},
+				inStreams: []<-chan int{first, second, third},
 			}
 
-			ds.Broadcast(Params{Num: 3})
-
-			got := []int{}
-			for val := range ds.inStreams {
+			outStream := ds.Listen(listenedIndex, Params{BufferSize: 10, Num: 1})
+			require.Len(t, outStream.inStreams, 1, "Listen should return a single output stream")
+			var got []int
+			for val := range outStream.inStreams[0] {
 				got = append(got, val)
 			}
 
