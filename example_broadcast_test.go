@@ -3,10 +3,11 @@ package pipelines_test
 import (
 	"context"
 	"fmt"
-	"github.com/elastiflow/pipelines"
-	"github.com/elastiflow/pipelines/datastreams/sinks"
 	"log"
 	"sync"
+
+	"github.com/elastiflow/pipelines"
+	"github.com/elastiflow/pipelines/datastreams/sinks"
 
 	"github.com/elastiflow/pipelines/datastreams"
 	"github.com/elastiflow/pipelines/datastreams/sources"

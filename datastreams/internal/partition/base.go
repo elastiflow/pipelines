@@ -70,10 +70,20 @@ func (b *Base[T]) Push(item T) {
 }
 
 func (b *Base[T]) FlushNext(ctx context.Context) {
-	next := b.Batch.Next()
-	if len(next) == 0 {
+	var (
+		next []T
+	)
+
+	select {
+	case <-ctx.Done():
 		return
+	default:
+		next = b.Batch.Next()
+		if len(next) == 0 {
+			return
+		}
 	}
+
 	b.Flush(ctx, next)
 }
 
