@@ -13,6 +13,7 @@ import (
 	"github.com/elastiflow/pipelines/datastreams/sources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestIntegrationPipeline_Map tests using Pipeline.Map with optional pre/post processing.
@@ -785,6 +786,377 @@ func TestIntegrationPipeline_Wait(t *testing.T) {
 			// Verify the pipeline's error channel has been closed
 			_, open := <-errChan
 			assert.False(t, open, "errorChan should be closed after Wait returns")
+		})
+	}
+}
+
+// TestPipelines_Start verifies that Pipelines.Start applies the supplied StreamFunc
+// to every pipeline in the collection.
+func TestPipelines_Start(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      []int
+		numPipes   int
+		streamFunc StreamFunc[int, int]
+		want       [][]int // expected output per pipeline (same length as numPipes)
+	}{
+		{
+			name:     "double numbers on all pipelines",
+			input:    []int{1, 2, 3, 4, 5},
+			numPipes: 3,
+			streamFunc: func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return ds.Run(func(v int) (int, error) { return v * 2, nil })
+			},
+			want: [][]int{
+				{2, 4, 6, 8, 10},
+				{2, 4, 6, 8, 10},
+				{2, 4, 6, 8, 10},
+			},
+		},
+		{
+			name:     "identity transform",
+			input:    []int{9, 8, 7},
+			numPipes: 2,
+			streamFunc: func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return ds // no‑op
+			},
+			want: [][]int{
+				{9, 8, 7},
+				{9, 8, 7},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := make(chan error, len(tt.input)*tt.numPipes)
+			defer close(errs)
+			root := New[int, int](context.Background(), NewMockSource(tt.input), errs)
+			coll := root.Broadcast(tt.numPipes).Start(tt.streamFunc)
+			require.Len(t, coll, tt.numPipes)
+			var wg sync.WaitGroup
+			wg.Add(tt.numPipes)
+			for i, pl := range coll {
+				i, pl := i, pl // capture
+				go func() {
+					defer wg.Done()
+					var got []int
+					for v := range pl.Out() {
+						got = append(got, v)
+					}
+					require.ElementsMatch(t, tt.want[i], got)
+				}()
+			}
+			wg.Wait()
+		})
+	}
+}
+
+// TestPipelines_Process verifies that Pipelines.Process mutates every pipeline
+// and returns a new Pipelines slice with the transformations applied.
+func TestPipelines_Process(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       []int
+		numPipes    int
+		process     datastreams.ProcessFunc[int]
+		finalStream StreamFunc[int, int]
+		wantPerPipe [][]int
+	}{
+		{
+			name:     "multiply by 10 then leave unchanged",
+			input:    []int{1, 2, 3},
+			numPipes: 2,
+			process: func(v int) (int, error) {
+				return v * 10, nil
+			},
+			finalStream: func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return ds // passthrough
+			},
+			wantPerPipe: [][]int{
+				{10, 20, 30},
+				{10, 20, 30},
+			},
+		},
+		{
+			name:     "process with filtering",
+			input:    []int{1, 2, 3, 4},
+			numPipes: 3,
+			process: func(v int) (int, error) {
+				if v%2 == 0 { // zero‑out even numbers
+					return 0, nil
+				}
+				return v, nil
+			},
+			finalStream: func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return ds.Run(func(v int) (int, error) { return v + 1, nil }) // add one
+			},
+			wantPerPipe: [][]int{
+				{2, 1, 4, 1},
+				{2, 1, 4, 1},
+				{2, 1, 4, 1},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := make(chan error, len(tt.input)*tt.numPipes)
+			defer close(errs)
+			root := New[int, int](context.Background(), NewMockSource(tt.input), errs)
+			coll := root.Broadcast(tt.numPipes).Process(tt.process).Start(tt.finalStream)
+			require.Len(t, coll, tt.numPipes)
+			var wg sync.WaitGroup
+			wg.Add(tt.numPipes)
+			for i, pl := range coll {
+				i, pl := i, pl
+				go func() {
+					defer wg.Done()
+					var got []int
+					for v := range pl.Out() {
+						got = append(got, v)
+					}
+					require.ElementsMatch(t, tt.wantPerPipe[i], got)
+				}()
+			}
+			wg.Wait()
+		})
+	}
+}
+
+// TestPipelines_Get exercises the Pipelines.Get helper, ensuring it returns the
+// correct pipeline (or error) for a variety of boundary conditions.
+func TestPipelines_Get(t *testing.T) {
+	type testCase struct {
+		name        string
+		setup       func() Pipelines[int, int]
+		index       int
+		wantNil     bool
+		expectError bool
+	}
+	tests := []testCase{
+		{
+			name: "valid first element",
+			setup: func() Pipelines[int, int] {
+				errs := make(chan error)
+				root := New[int, int](
+					context.Background(),
+					NewMockSource([]int{1}),
+					errs,
+				)
+				return root.Broadcast(3)
+			},
+			index:       0,
+			wantNil:     false,
+			expectError: false,
+		},
+		{
+			name: "valid last element",
+			setup: func() Pipelines[int, int] {
+				errs := make(chan error)
+				root := New[int, int](
+					context.Background(),
+					NewMockSource([]int{1}),
+					errs,
+				)
+				return root.Broadcast(3)
+			},
+			index:       2,
+			wantNil:     false,
+			expectError: false,
+		},
+		{
+			name: "negative index",
+			setup: func() Pipelines[int, int] {
+				return Pipelines[int, int]{}
+			},
+			index:       -1,
+			wantNil:     true,
+			expectError: true,
+		},
+		{
+			name: "index == len(collection)",
+			setup: func() Pipelines[int, int] {
+				errs := make(chan error)
+				root := New[int, int](
+					context.Background(),
+					NewMockSource([]int{1}),
+					errs,
+				)
+				return root.Broadcast(2)
+			},
+			index:       2,
+			wantNil:     true,
+			expectError: true,
+		},
+		{
+			name:        "empty collection",
+			setup:       func() Pipelines[int, int] { return nil },
+			index:       0,
+			wantNil:     true,
+			expectError: true,
+		},
+		{
+			name: "valid but underlying pipeline is nil",
+			setup: func() Pipelines[int, int] {
+				return Pipelines[int, int]{nil}
+			},
+			index:       0,
+			wantNil:     true,
+			expectError: false,
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			collection := tc.setup()
+			got, err := collection.Get(tc.index)
+			if tc.expectError {
+				require.Error(t, err, "expected an error but got nil")
+				require.Nil(t, got, "expected returned pipeline to be nil on error")
+				return
+			}
+			require.NoError(t, err, "unexpected error from Get")
+			if tc.wantNil {
+				require.Nil(t, got, "expected nil pipeline pointer")
+			} else {
+				require.Same(t, collection[tc.index], got,
+					"returned pointer must match element stored in slice")
+			}
+		})
+	}
+}
+
+func TestPipelines_Wait(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       []int
+		numPipes    int
+		cancelEarly bool
+	}{
+		{
+			name:     "complete normally",
+			input:    []int{5, 6, 7},
+			numPipes: 2,
+		},
+		{
+			name:        "context canceled early",
+			input:       []int{1, 2, 3, 4, 5},
+			numPipes:    3,
+			cancelEarly: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			errs := make(chan error, len(tt.input)*tt.numPipes)
+			defer close(errs)
+			root := New[int, int](ctx, NewMockSource(tt.input), errs)
+			coll := root.Broadcast(tt.numPipes).Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return ds
+			})
+			if tt.cancelEarly {
+				cancel()
+			}
+			var drainWG sync.WaitGroup
+			for _, pl := range coll {
+				drainWG.Add(1)
+				go func(p *Pipeline[int, int]) {
+					defer drainWG.Done()
+					for range p.Out() {
+					}
+				}(pl)
+			}
+			waitDone := make(chan struct{})
+			go func() {
+				coll.Wait()
+				close(waitDone)
+			}()
+			assert.Eventually(t, func() bool {
+				select {
+				case <-waitDone:
+					return true
+				default:
+					return false
+				}
+			}, 120*time.Second, 20*time.Millisecond, "Pipelines.Wait() never returned")
+			for _, pl := range coll {
+				assert.Eventually(t, func() bool {
+					select {
+					case _, open := <-pl.Out():
+						return !open
+					default:
+						return false
+					}
+				}, 120*time.Second, 10*time.Millisecond, "pipeline Out channel not closed")
+			}
+			drainWG.Wait()
+		})
+	}
+}
+
+func TestPipelines_Close(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []int
+		numPipes int
+	}{
+		{
+			name:     "close stops all pipelines",
+			input:    []int{1, 2, 3, 4},
+			numPipes: 2,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			errs := make(chan error, len(tt.input)*tt.numPipes)
+			defer close(errs)
+			root := New[int, int](
+				context.Background(),
+				NewMockSource(tt.input),
+				errs,
+			)
+			coll := root.Broadcast(tt.numPipes).Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return ds.Run(func(v int) (int, error) { return v * 2, nil })
+			})
+			var drainWG sync.WaitGroup
+			for _, pl := range coll {
+				drainWG.Add(1)
+				go func(p *Pipeline[int, int]) {
+					defer drainWG.Done()
+					for range p.Out() {
+					}
+				}(pl)
+			}
+			coll.Close()
+			waitDone := make(chan struct{})
+			go func() {
+				coll.Wait()
+				close(waitDone)
+			}()
+			assert.Eventually(t, func() bool {
+				select {
+				case <-waitDone:
+					return true
+				default:
+					return false
+				}
+			}, 120*time.Second, 20*time.Millisecond, "Wait() did not return after Close()")
+			for _, pl := range coll {
+				assert.Eventually(t, func() bool {
+					select {
+					case _, open := <-pl.Out():
+						return !open
+					default:
+						return false
+					}
+				}, 120*time.Second, 10*time.Millisecond, "pipeline Out channel not closed after Close")
+			}
+			drainWG.Wait()
 		})
 	}
 }
