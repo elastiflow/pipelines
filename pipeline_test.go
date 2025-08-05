@@ -369,6 +369,84 @@ func TestIntegrationPipeline_Tee(t *testing.T) {
 	}
 }
 
+// TestIntegrationPipeline_Copy checks copying the pipeline output to multiple streams.
+func TestIntegrationPipeline_Copy(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      []int
+		process    StreamFunc[int, int]
+		wantOutput []int
+		copies     int
+	}{
+		{
+			name:  "simple process is applied to all copies",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return p.Run(
+					func(v int) (int, error) {
+						return v * 2, nil
+					},
+				)
+			},
+			wantOutput: []int{2, 4, 6, 8, 10},
+			copies:     3,
+		},
+		{
+			name:  "returns single output with error handling if no copies are needed",
+			input: []int{1, 2, 3, 4, 5},
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+				return p.Run(
+					func(v int) (int, error) {
+						if v%2 == 0 {
+							return 0, fmt.Errorf("even number error")
+						}
+						return v, nil
+					},
+				)
+			},
+			wantOutput: []int{1, 0, 3, 0, 5},
+			copies:     0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			errs := make(chan error, len(tt.input)*3)
+			defer close(errs)
+			pls := New[int, int](
+				context.Background(),
+				sources.FromArray(tt.input),
+				errs,
+			).Copy(tt.copies).
+				Start(tt.process)
+
+			collectOut := func(got []int, out <-chan int) []int {
+				for v := range out {
+					got = append(got, v)
+				}
+				return got
+			}
+
+			wg := sync.WaitGroup{}
+			wg.Add(pls.Count())
+			results := make([][]int, tt.copies)
+			for i := 0; i < pls.Count(); i++ {
+				results[i] = make([]int, 0, len(tt.input))
+				go func() {
+					defer wg.Done()
+					results[i] = collectOut(results[i], pls[i].Out())
+				}()
+			}
+
+			wg.Wait()
+			for i := 0; i < tt.copies; i++ {
+				assert.ElementsMatch(t, tt.wantOutput, results[i])
+			}
+		})
+	}
+}
+
 // TestPipeline_ToSource verifies converting a pipeline's sink to a sourcer for another pipeline.
 func TestPipeline_ToSource(t *testing.T) {
 	t.Run("should create a source from all the streams", func(t *testing.T) {

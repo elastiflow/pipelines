@@ -88,7 +88,7 @@ func (p *Pipeline[T, U]) Close() {
 	p.cancelFunc()
 }
 
-// Errors method returns the error channel of the Pipeline.
+// Errors returns the error channel of the Pipeline.
 //
 // This channel receives errors from any stage (e.g. transformations, filters, sinks).
 // The caller should consume from it to handle errors appropriately.
