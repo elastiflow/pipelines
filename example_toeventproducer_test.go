@@ -23,13 +23,13 @@ type mockQueueClient struct {
 // Produce simulates sending a single message to the external queue.
 func (c *mockQueueClient) Produce(msg string) {
 	// In a real application, this would send the message over the network.
-	log.Printf("📩 [%s] Producing event: '%s'", c.name, msg)
+	log.Printf("[%s] Producing event: '%s'", c.name, msg)
 	time.Sleep(50 * time.Millisecond) // Simulate network latency.
 	c.wg.Done()                       // Signal that this message has been "sent".
 }
 
 func ExampleToEventProducer() {
-	log.Println("🚀 Starting ToEventProducer example...")
+	log.Println("Starting ToEventProducer example...")
 
 	// 1. Setup context and error handling.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -67,5 +67,5 @@ func ExampleToEventProducer() {
 	log.Println("Pipeline finished. Waiting for producer to send all events...")
 	mockClient.wg.Wait()
 
-	log.Println("✅ ToEventProducer example finished successfully.")
+	log.Println("ToEventProducer example finished successfully.")
 }

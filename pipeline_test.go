@@ -832,7 +832,7 @@ func TestPipelines_Start(t *testing.T) {
 			errs := make(chan error, len(tt.input)*tt.numPipes)
 			defer close(errs)
 			root := New[int, int](context.Background(), NewMockSource(tt.input), errs)
-			coll := root.Broadcast(tt.numPipes).Start(tt.streamFunc)
+			coll := root.Copy(tt.numPipes).Start(tt.streamFunc)
 			require.Len(t, coll, tt.numPipes)
 			var wg sync.WaitGroup
 			wg.Add(tt.numPipes)
@@ -904,7 +904,7 @@ func TestPipelines_Process(t *testing.T) {
 			errs := make(chan error, len(tt.input)*tt.numPipes)
 			defer close(errs)
 			root := New[int, int](context.Background(), NewMockSource(tt.input), errs)
-			coll := root.Broadcast(tt.numPipes).Process(tt.process).Start(tt.finalStream)
+			coll := root.Copy(tt.numPipes).Process(tt.process).Start(tt.finalStream)
 			require.Len(t, coll, tt.numPipes)
 			var wg sync.WaitGroup
 			wg.Add(tt.numPipes)
@@ -944,7 +944,7 @@ func TestPipelines_Get(t *testing.T) {
 					NewMockSource([]int{1}),
 					errs,
 				)
-				return root.Broadcast(3)
+				return root.Copy(3)
 			},
 			index:       0,
 			wantNil:     false,
@@ -959,7 +959,7 @@ func TestPipelines_Get(t *testing.T) {
 					NewMockSource([]int{1}),
 					errs,
 				)
-				return root.Broadcast(3)
+				return root.Copy(3)
 			},
 			index:       2,
 			wantNil:     false,
@@ -983,7 +983,7 @@ func TestPipelines_Get(t *testing.T) {
 					NewMockSource([]int{1}),
 					errs,
 				)
-				return root.Broadcast(2)
+				return root.Copy(2)
 			},
 			index:       2,
 			wantNil:     true,
@@ -1055,7 +1055,7 @@ func TestPipelines_Wait(t *testing.T) {
 			errs := make(chan error, len(tt.input)*tt.numPipes)
 			defer close(errs)
 			root := New[int, int](ctx, NewMockSource(tt.input), errs)
-			coll := root.Broadcast(tt.numPipes).Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+			coll := root.Copy(tt.numPipes).Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
 				return ds
 			})
 			if tt.cancelEarly {
@@ -1120,7 +1120,7 @@ func TestPipelines_Close(t *testing.T) {
 				NewMockSource(tt.input),
 				errs,
 			)
-			coll := root.Broadcast(tt.numPipes).Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+			coll := root.Copy(tt.numPipes).Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
 				return ds.Run(func(v int) (int, error) { return v * 2, nil })
 			})
 			var drainWG sync.WaitGroup

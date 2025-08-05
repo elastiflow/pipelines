@@ -19,7 +19,7 @@ type listenerOutput struct {
 }
 
 func ExamplePipeline_Broadcast() {
-	log.Println("🚀 Starting Listen example...")
+	log.Println("Starting Listen example...")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -43,7 +43,7 @@ func ExamplePipeline_Broadcast() {
 		ctx,
 		sourcer,
 		make(chan error, 1),
-	).Broadcast(3)
+	).Copy(3)
 
 	// 4. Start the pipeline with a listener that processes each stream.
 	go func() {

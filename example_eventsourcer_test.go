@@ -49,16 +49,16 @@ func (m *mockEventConsumer) Run(ctx context.Context) {
 
 // MarkSuccess is called when a message is successfully processed by the pipeline.
 func (m *mockEventConsumer) MarkSuccess(msg int) {
-	log.Printf("✅ SUCCESS: Message '%d' was successfully processed and acknowledged.\n", msg)
+	log.Printf("SUCCESS: Message '%d' was successfully processed and acknowledged.\n", msg)
 }
 
 // MarkError is called when a message fails processing in the pipeline.
 func (m *mockEventConsumer) MarkError(msg int, err error) {
-	log.Printf("❌ ERROR: Message '%d' failed processing and was marked with error: %v\n", msg, err)
+	log.Printf("ERROR: Message '%d' failed processing and was marked with error: %v\n", msg, err)
 }
 
 func ExampleNewEventSourcer() {
-	log.Println("🚀 Starting EventSourcer example pipeline...")
+	log.Println("Starting EventSourcer example pipeline...")
 
 	// 1. Set up a context for graceful shutdown.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -117,5 +117,5 @@ func ExampleNewEventSourcer() {
 		log.Fatalf("Pipeline failed with error: %v", err)
 	}
 
-	log.Println("✅ Example finished successfully.")
+	log.Println("Example finished successfully.")
 }

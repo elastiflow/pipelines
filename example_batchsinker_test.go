@@ -25,7 +25,7 @@ type processedItem struct {
 }
 
 func ExampleBatchSinker() {
-	log.Println("🚀 Starting complex batch processing example...")
+	log.Println("Starting complex batch processing example...")
 
 	const (
 		numItemsToProcess = 10_000

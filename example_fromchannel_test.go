@@ -14,7 +14,7 @@ import (
 )
 
 func ExampleFromChannel() {
-	log.Println("🚀 Starting FromChannel example pipeline...")
+	log.Println("Starting FromChannel example pipeline...")
 
 	// 1. Set up a context for graceful shutdown.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -59,5 +59,5 @@ func ExampleFromChannel() {
 	}
 
 	wg.Wait()
-	log.Println("✅ FromChannel example finished successfully.")
+	log.Println("FromChannel example finished successfully.")
 }

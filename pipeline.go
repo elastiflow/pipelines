@@ -259,13 +259,18 @@ func (p *Pipeline[T, U]) Tee(params ...datastreams.Params) (datastreams.DataStre
 
 // ToSource converts the pipeline's sink into a datastreams.Sourcer[U], allowing it to be used
 // as a source in another pipeline.
+// This is useful when you want to take the output of one pipeline and use it as the input
+// for another pipeline.
 func (p *Pipeline[T, U]) ToSource() datastreams.Sourcer[U] {
 	return sources.FromDataStream[U](p.sinkDS)
 }
 
-// Broadcast creates multiple copies of the pipeline's source DataStream,
-// allowing the same data to be processed in parallel by multiple downstream stages.
-func (p *Pipeline[T, U]) Broadcast(num int) Pipelines[T, U] {
+// Copy creates multiple copies of the current pipeline's source DataStream,
+// allowing the same data to be processed in parallel across multiple pipelines.
+//
+// Parameters:
+//   - num: the number of copies to create.
+func (p *Pipeline[T, U]) Copy(num int) Pipelines[T, U] {
 	next := p.sourceDS.Broadcast(datastreams.Params{
 		Num: num,
 	})
@@ -279,6 +284,19 @@ func (p *Pipeline[T, U]) Broadcast(num int) Pipelines[T, U] {
 	}
 
 	return out
+}
+
+// Broadcast creates multiple copies of the current pipeline's source DataStream,
+// allowing the same data to be processed in parallel across multiple pipelines
+// and allows for different sinks or processing logic to be applied to each copy.
+//
+// Parameters:
+//   - num: the number of copies to create.
+//   - streamFunc: a StreamFunc[T, U] that will be applied to each copy of the source DataStream.
+func (p *Pipeline[T, U]) Broadcast(num int, streamFunc StreamFunc[T, U]) Pipelines[T, U] {
+	pls := p.Copy(num)
+	pls.Start(streamFunc)
+	return pls
 }
 
 // Wait blocks until the pipeline's source has consumed all messages or the context

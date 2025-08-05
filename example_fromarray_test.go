@@ -15,7 +15,7 @@ import (
 )
 
 func ExampleFromArray() {
-	log.Println("🚀 Starting FromSlice example pipeline...")
+	log.Println("Starting FromSlice example pipeline...")
 
 	// 1. Set up a context for graceful shutdown.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -51,5 +51,5 @@ func ExampleFromArray() {
 	}
 
 	wg.Wait() // Wait for the sink to finish processing.
-	log.Println("✅ FromSlice example finished successfully.")
+	log.Println("FromSlice example finished successfully.")
 }
