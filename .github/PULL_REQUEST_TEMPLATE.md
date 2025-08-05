@@ -5,6 +5,15 @@ Not mandatory, don't copy/paste PR name here if it doest not make sense.
 Short/Long description of the PR
 -->
 
+# Related Issues
+
+<!--
+List the issues this PR closes and/or relates to.
+- Closes #1
+- Relates to #2
+-->
+
+
 # Changes summary
 
 <!--
