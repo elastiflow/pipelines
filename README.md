@@ -51,9 +51,13 @@ transformations or filtering in a concurrent manner.
 
 ## High-Level Details
 
+### Pipelines
+
+The `Pipelines` type represents a collection of `Pipeline` instances. It is designed to simplify managing multiple concurrent pipelines, especially when you split a single data source into several parallel streams (i.e., using `Broadcast`). This allows you to control a group of pipelines as a single unit, for example, starting or stopping them all at once.
+
 ### Pipeline
 
-A pipeline is a series of data processing stages connected by channels. Each stage (`datastreams.DataStream`) is a function that performs a specific task and passes its output to the next stage. The `pipelines` module provides a flexible way to define and manage these stages.
+A `Pipeline` is a series of data processing stages connected by channels. Each stage (`datastreams.DataStream`) is a function that performs a specific task and passes its output to the next stage. The `pipelines` module provides a flexible way to define and manage these stages.
 
 ### DataStream
 

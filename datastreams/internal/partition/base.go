@@ -74,6 +74,7 @@ func (b *Base[T]) FlushNext(ctx context.Context) {
 	if len(next) == 0 {
 		return
 	}
+
 	b.Flush(ctx, next)
 }
 

@@ -311,6 +311,44 @@ func (p DataStream[T]) Broadcast(
 	return nextPipe
 }
 
+// Listen allows you to subscribe to a DataStream, effectively
+// creating a new DataStream that listens to the same input channel.
+// This allows you to broadcast the same input stream to multiple listeners.
+func (p DataStream[T]) Listen(
+	listenerIndex int,
+	params ...Params,
+) DataStream[T] {
+	if listenerIndex < 0 || listenerIndex >= len(p.inStreams) {
+		return DataStream[T]{
+			ctx:       p.ctx,
+			errStream: p.errStream,
+			inStreams: []<-chan T{},
+			wg:        p.wg,
+		}
+	}
+
+	param := applyParams(params...)
+	nextPipe, outChannels := next[T](fanIn, param, 1, p.ctx, p.errStream, p.wg)
+	p.incrementWaitGroup(1)
+	go func(inStream <-chan T, outStreams pipes.Senders[T]) {
+		if p.wg != nil {
+			defer p.wg.Done()
+		}
+		defer outChannels.Close()
+		for val := range inStream {
+			for i := 0; i < len(outStreams); i++ {
+				in := val
+				select {
+				case outStreams[i] <- in:
+				case <-p.ctx.Done():
+					return
+				}
+			}
+		}
+	}(p.inStreams[listenerIndex], outChannels.Senders())
+	return nextPipe
+}
+
 // Tee splits values coming in from a single channel so that you can send them
 // off into two separate DataStream outputs.
 func (p DataStream[T]) Tee(

@@ -1047,6 +1047,63 @@ func TestDataStream_WithWaitGroup(t *testing.T) {
 	}
 }
 
+func TestDataStream_Listen(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []int
+		want  []int
+	}{
+		{
+			name:  "should only see output from a single input",
+			input: []int{1, 2, 3},
+			want:  []int{1, 2, 3},
+		},
+		{
+			name:  "empty input",
+			input: []int{},
+			want:  []int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			first := make(chan int, 10)
+			second := make(chan int, 10)
+			third := make(chan int, 10)
+			listenedIndex := 1
+			for _, val := range tt.input {
+				second <- val
+			}
+
+			for i := 0; i < 10; i++ {
+				first <- i + 10 // Just some different values for first channel
+				third <- i + 20 // Just some different values for third channel
+			}
+
+			close(first)
+			close(second)
+			close(third)
+			ds := DataStream[int]{
+				ctx:       ctx,
+				errStream: make(chan<- error),
+				inStreams: []<-chan int{first, second, third},
+			}
+
+			outStream := ds.Listen(listenedIndex, Params{BufferSize: 10, Num: 1})
+			require.Len(t, outStream.inStreams, 1, "Listen should return a single output stream")
+			var got []int
+			for val := range outStream.inStreams[0] {
+				got = append(got, val)
+			}
+
+			assert.ElementsMatch(t, tt.want, got)
+		})
+	}
+}
+
 // MockSinkerFunc is a helper type that implements the Sinker[T] interface via a function.
 type MockSinkerFunc[T any] func(ctx context.Context, ds DataStream[T]) error
 
