@@ -5,13 +5,13 @@ import (
 	"errors"
 	"time"
 
-	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
+	"github.com/elastiflow/pipelines/datastreams/partitioner"
 )
 
 // timedInterval accumulates items and publishes them every `interval`.
 type timedInterval[T any] struct {
-	*partition.Base[T]
+	*partitioner.Base[T]
 	interval time.Duration
 }
 
@@ -22,9 +22,9 @@ func newInterval[T any](
 	out pipes.Senders[[]T],
 	errs chan<- error,
 	interval time.Duration,
-) partition.Partition[T] {
+) partitioner.Partition[T] {
 	w := &timedInterval[T]{
-		Base:     partition.NewBase[T](out, errs),
+		Base:     partitioner.NewBase[T](out, errs),
 		interval: interval,
 	}
 	// Start the background ticker right away
@@ -53,7 +53,7 @@ func (t *timedInterval[T]) startInterval(ctx context.Context) {
 // interval duration.
 func NewIntervalFactory[T any](
 	interval time.Duration,
-) (partition.Factory[T], error) {
+) (partitioner.Factory[T], error) {
 	if interval <= 0 {
 		return nil, errors.New("interval must be greater than 0")
 	}
@@ -61,7 +61,7 @@ func NewIntervalFactory[T any](
 		ctx context.Context,
 		out pipes.Senders[[]T],
 		errs chan<- error,
-	) partition.Partition[T] {
+	) partitioner.Partition[T] {
 		return newInterval[T](ctx, out, errs, interval)
 	}, nil
 }

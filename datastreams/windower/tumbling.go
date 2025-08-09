@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
+	"github.com/elastiflow/pipelines/datastreams/partitioner"
 )
 
 type status struct {
@@ -32,7 +32,7 @@ func (s *status) tryStart() bool {
 // After windowDuration, it publishes the batch and clears it, then waits
 // for the next item to start a new timer.
 type tumbling[T any] struct {
-	*partition.Base[T]
+	*partitioner.Base[T]
 	ctx            context.Context
 	status         *status
 	windowDuration time.Duration
@@ -45,10 +45,10 @@ func newTumbling[T any](
 	out pipes.Senders[[]T],
 	errs chan<- error,
 	windowDuration time.Duration,
-) partition.Partition[T] {
+) partitioner.Partition[T] {
 
 	t := &tumbling[T]{
-		Base:           partition.NewBase[T](out, errs),
+		Base:           partitioner.NewBase[T](out, errs),
 		windowDuration: windowDuration,
 		ctx:            ctx,
 		status:         newStatus(),
@@ -86,7 +86,7 @@ func (t *tumbling[T]) waitAndFlush() {
 // window duration.
 func NewTumblingFactory[T any](
 	windowDuration time.Duration,
-) (partition.Factory[T], error) {
+) (partitioner.Factory[T], error) {
 	if windowDuration <= 0 {
 		return nil, errors.New("window duration must be greater than 0")
 	}
@@ -94,7 +94,7 @@ func NewTumblingFactory[T any](
 		ctx context.Context,
 		out pipes.Senders[[]T],
 		errs chan<- error,
-	) partition.Partition[T] {
+	) partitioner.Partition[T] {
 		return newTumbling(ctx, out, errs, windowDuration)
 	}, nil
 }

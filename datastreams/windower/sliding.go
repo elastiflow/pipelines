@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
+	"github.com/elastiflow/pipelines/datastreams/partitioner"
 )
 
 // record pairs a value with the moment it arrived.
@@ -79,7 +79,7 @@ func (s *slidingBatch[T]) next(
 // sliding emits overlapping windows of size windowDuration,
 // every slideInterval apart.
 type sliding[T any] struct {
-	*partition.Base[T]
+	*partitioner.Base[T]
 
 	windowDuration time.Duration
 	slideInterval  time.Duration
@@ -92,9 +92,9 @@ func newSliding[T any](
 	out pipes.Senders[[]T],
 	errs chan<- error,
 	windowDuration, slideInterval time.Duration,
-) partition.Partition[T] {
+) partitioner.Partition[T] {
 	s := &sliding[T]{
-		Base:           partition.NewBase[T](out, errs),
+		Base:           partitioner.NewBase[T](out, errs),
 		windowDuration: windowDuration,
 		slideInterval:  slideInterval,
 		sb:             newSlidingBatch[T](),
@@ -131,7 +131,7 @@ func (s *sliding[T]) run(ctx context.Context) {
 // NewSlidingFactory constructs a sliding window factory.
 func NewSlidingFactory[T any](
 	windowDuration, slideInterval time.Duration,
-) (partition.Factory[T], error) {
+) (partitioner.Factory[T], error) {
 	if windowDuration <= 0 || slideInterval <= 0 {
 		return nil, errors.New("window duration and slide interval must be greater than 0")
 
@@ -144,7 +144,7 @@ func NewSlidingFactory[T any](
 		ctx context.Context,
 		out pipes.Senders[[]T],
 		errs chan<- error,
-	) partition.Partition[T] {
+	) partitioner.Partition[T] {
 		return newSliding(ctx, out, errs, windowDuration, slideInterval)
 	}, nil
 }
