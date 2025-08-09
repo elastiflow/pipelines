@@ -16,6 +16,7 @@ const (
 	EXPAND
 	KEY_BY
 	WINDOW
+	SWITCH
 )
 
 // String converts ErrorCode enum into a string value
@@ -28,6 +29,7 @@ func (w ErrorCode) String() string {
 		"EXPAND",
 		"KEY_BY",
 		"WINDOW",
+		"SWITCH",
 	}[w]
 }
 
@@ -83,6 +85,10 @@ func newKeyByError(segment string, err error) error {
 
 func newWindowError(segment string, err error) error {
 	return newError(WINDOW, segment, err.Error())
+}
+
+func newSwitchError(segment string, err error) error {
+	return newError(SWITCH, segment, err.Error())
 }
 
 func isError(err error, code ErrorCode) bool {

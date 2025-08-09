@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elastiflow/pipelines/datastreams/internal/partition"
+	"github.com/elastiflow/pipelines/datastreams/partitioner"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"github.com/stretchr/testify/assert"
@@ -18,7 +18,7 @@ func TestNewSlidingFactory(t *testing.T) {
 		windowDuration time.Duration
 		slideInterval  time.Duration
 		assertErr      func(t *testing.T, err error)
-		assert         func(t *testing.T, p partition.Factory[int])
+		assert         func(t *testing.T, p partitioner.Factory[int])
 	}{
 		{
 			name:           "valid parameters",
@@ -27,7 +27,7 @@ func TestNewSlidingFactory(t *testing.T) {
 			assertErr: func(t *testing.T, err error) {
 				assert.NoError(t, err)
 			},
-			assert: func(t *testing.T, p partition.Factory[int]) {
+			assert: func(t *testing.T, p partitioner.Factory[int]) {
 				assert.NotNil(t, p)
 			},
 		},
@@ -39,7 +39,7 @@ func TestNewSlidingFactory(t *testing.T) {
 				assert.Error(t, err)
 				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
 			},
-			assert: func(t *testing.T, p partition.Factory[int]) {
+			assert: func(t *testing.T, p partitioner.Factory[int]) {
 				assert.Nil(t, p)
 			},
 		},
@@ -51,7 +51,7 @@ func TestNewSlidingFactory(t *testing.T) {
 				assert.Error(t, err)
 				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
 			},
-			assert: func(t *testing.T, p partition.Factory[int]) {
+			assert: func(t *testing.T, p partitioner.Factory[int]) {
 				assert.Nil(t, p)
 			},
 		},
@@ -63,7 +63,7 @@ func TestNewSlidingFactory(t *testing.T) {
 				assert.Error(t, err)
 				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
 			},
-			assert: func(t *testing.T, p partition.Factory[int]) {
+			assert: func(t *testing.T, p partitioner.Factory[int]) {
 				assert.Nil(t, p)
 			},
 		},
@@ -166,14 +166,14 @@ func Test_newSliding(t *testing.T) {
 		windowDuration time.Duration
 		slideInterval  time.Duration
 		shouldPanic    bool
-		assert         func(t *testing.T, p partition.Partition[int])
+		assert         func(t *testing.T, p partitioner.Partition[int])
 	}{
 		{
 			name:           "valid parameters",
 			windowDuration: 200 * time.Millisecond,
 			slideInterval:  50 * time.Millisecond,
 			shouldPanic:    false,
-			assert: func(t *testing.T, p partition.Partition[int]) {
+			assert: func(t *testing.T, p partitioner.Partition[int]) {
 				assert.NotNil(t, p)
 				assert.IsType(t, &sliding[int]{}, p)
 			},

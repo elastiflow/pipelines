@@ -5,9 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elastiflow/pipelines/datastreams/internal/partition"
-
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
+	"github.com/elastiflow/pipelines/datastreams/partitioner"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -17,7 +16,7 @@ func TestNewTumblingFactory(t *testing.T) {
 		windowDuration time.Duration
 		slideInterval  time.Duration
 		assertErr      func(t *testing.T, err error)
-		assert         func(t *testing.T, p partition.Factory[int])
+		assert         func(t *testing.T, p partitioner.Factory[int])
 	}{
 		{
 			name:           "invalid window duration and slide interval",
@@ -27,7 +26,7 @@ func TestNewTumblingFactory(t *testing.T) {
 				assert.Error(t, err)
 				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
 			},
-			assert: func(t *testing.T, p partition.Factory[int]) {
+			assert: func(t *testing.T, p partitioner.Factory[int]) {
 				assert.Nil(t, p)
 			},
 		},

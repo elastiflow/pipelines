@@ -1,7 +1,8 @@
-package partition
+package partitioner
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -76,28 +77,28 @@ func TestPartitioner_Partition(t *testing.T) {
 		{
 			name: "Single key, multiple values",
 			inputs: []input{
-				{key: "a", values: []int{1, 2, 3}},
+				{key: "1", values: []int{1, 1, 1}},
 			},
-			expectedKeys: []string{"a"},
+			expectedKeys: []string{"1"},
 			expectedLen:  3,
 		},
 		{
 			name: "Multiple keys",
 			inputs: []input{
-				{key: "a", values: []int{1}},
-				{key: "b", values: []int{2}},
+				{key: "1", values: []int{1}},
+				{key: "2", values: []int{2}},
 			},
-			expectedKeys: []string{"a", "b"},
+			expectedKeys: []string{"1", "2"},
 			expectedLen:  1,
 		},
 		{
 			name: "With time marker and watermark generator",
 			inputs: []input{
-				{key: "c", values: []int{9, 8}},
+				{key: "", values: []int{9, 8}},
 			},
 			watermarker:  wm,
 			timeMarker:   tm,
-			expectedKeys: []string{"c"},
+			expectedKeys: []string{"9", "8"},
 			expectedLen:  2,
 			configMocks: func(tm *mockTimeMarker, wm *mockWaterMarker[int]) {
 				tm.On("Now").Return(time.Now())
@@ -109,38 +110,38 @@ func TestPartitioner_Partition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// fresh store each test
-			mgr := NewPartitioner[int, string](
-				context.Background(),
-				output.Senders(),
+			mgr := New[int, string](
 				func(ctx context.Context, out pipes.Senders[[]int], errs chan<- error) Partition[int] {
 					return &mockPartition[int]{}
 				},
-				func() TimeMarker {
-					if tt.timeMarker != nil {
-						return tt.timeMarker
-					}
-					return nil
-				}(),
-				func() WatermarkGenerator[int] {
-					if tt.watermarker != nil {
-						return tt.watermarker
-					}
-					return nil
-				}(),
-			)
+			).WithWatermarkGenerator(tt.watermarker).
+				WithTimeMarker(tt.timeMarker).
+				WithContext(context.Background()).
+				WithSenders(output.Senders()).
+				Build()
 
 			if tt.configMocks != nil {
 				tt.configMocks(tm, wm)
 			}
 
-			for _, input := range tt.inputs {
-				for _, val := range input.values {
-					mgr.Partition(input.key, val)
+			inputStreams := make([]<-chan int, len(tt.inputs))
+			for i, vals := range tt.inputs {
+				ch := make(chan int, len(vals.values))
+				for _, val := range tt.inputs[i].values {
+					ch <- val
 				}
+				close(ch)
+				inputStreams[i] = ch
 			}
 
-			assert.ElementsMatch(t, mgr.Keys(), tt.expectedKeys)
+			mgr.Partition(func(i int) string {
+				return fmt.Sprintf("%d", i)
+			}, inputStreams)
+
+			assert.Eventually(t, func() bool {
+				return assert.ElementsMatch(t, mgr.Keys(), tt.expectedKeys)
+			}, 100*time.Millisecond, 10*time.Millisecond)
+
 		})
 	}
 }

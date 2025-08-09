@@ -1,4 +1,4 @@
-package partition
+package partitioner
 
 import (
 	"sync"

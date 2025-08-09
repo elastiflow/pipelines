@@ -23,3 +23,9 @@ type KeyFunc[T any, K comparable] func(T) K
 // function in conjunction with the KeyedDataStream to perform windowed operations on  batches
 // of data with a given key.
 type WindowFunc[T any, R any] func([]T) (R, error)
+
+// JoinFunc is a user defined function that takes two values of type T and U and returns a value of type R.
+// This function is used to join two keyed data streams by key.
+type JoinFunc[T any, U any, K comparable, R any] func([]KeyableUnion[T, U, K]) (R, error)
+
+type RouteFunc[T any, RouteKey comparable] func(T) (RouteKey, error)
