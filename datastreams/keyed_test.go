@@ -18,9 +18,9 @@ type testStruct struct {
 	Name string
 }
 
-func drain(outCh <-chan testStruct) {
-	for range outCh {
-	}
+type testDatum struct {
+	ID   int
+	Data string
 }
 
 func TestKeyBy(t *testing.T) {
@@ -188,14 +188,16 @@ type User struct {
 
 func TestJoin(t *testing.T) {
 	testCases := []struct {
-		name     string
-		left     []*UserName
-		right    []*UserAge
-		process  func(t []KeyableUnion[*UserAge, *UserName, int]) (*User, error)
-		expected []*User
+		name          string
+		left          []*UserName
+		right         []*UserAge
+		process       func(t []KeyableUnion[*UserAge, *UserName, int]) (*User, error)
+		expected      []*User
+		throttleLeft  time.Duration
+		throttleRight time.Duration
 	}{
 		{
-			name: "Should join streams with the same user id",
+			name: "Should join streams with the same user id in the same window",
 			left: []*UserName{
 				{
 					Name: "some-name",
@@ -245,7 +247,7 @@ func TestJoin(t *testing.T) {
 			},
 		},
 		{
-			name: "Should not join streams with different user ids",
+			name: "Should not join streams with different user ids in the same window",
 			left: []*UserName{
 				{
 					Name: "some-name",
@@ -284,6 +286,60 @@ func TestJoin(t *testing.T) {
 					User: 3,
 				},
 			},
+			process: func(t []KeyableUnion[*UserAge, *UserName, int]) (*User, error) {
+				u := &User{}
+				for _, rec := range t {
+					if left := rec.Left(); left != nil {
+						u.Age = left.Value().Num
+						u.User = left.Key()
+					}
+
+					if right := rec.Right(); right != nil {
+						u.Name = right.Value().Name
+						u.User = right.Key()
+					}
+				}
+				return u, nil
+			},
+		},
+		{
+			name: "Should not join elements in different windows",
+			left: []*UserName{
+				{
+					Name: "some-name",
+					User: 1,
+				},
+				{
+					Name: "some-other",
+					User: 2,
+				},
+			},
+			right: []*UserAge{
+				{
+					Num:  9,
+					User: 1,
+				},
+				{
+					Num:  13,
+					User: 2,
+				},
+			},
+			expected: []*User{
+				{
+					User: 1,
+					Name: "some-name",
+					Age:  9,
+				},
+				{
+					Name: "some-other",
+					User: 2,
+				},
+				{
+					Age:  13,
+					User: 2,
+				},
+			},
+			throttleRight: 600 * time.Millisecond,
 			process: func(t []KeyableUnion[*UserAge, *UserName, int]) (*User, error) {
 				u := &User{}
 				for _, rec := range t {
@@ -313,12 +369,14 @@ func TestJoin(t *testing.T) {
 			go func(appCtx context.Context, left []*UserName) {
 				for _, elem := range left {
 					leftStream <- elem
+					time.Sleep(tt.throttleLeft)
 				}
 			}(ctx, tt.left)
 
 			go func(appCtx context.Context, right []*UserAge) {
 				for _, elem := range right {
 					rightStream <- elem
+					time.Sleep(tt.throttleRight)
 				}
 			}(ctx, tt.right)
 
@@ -331,7 +389,7 @@ func TestJoin(t *testing.T) {
 				},
 				Params{
 					BufferSize: 50,
-					Num:        1, // only 1 output channel per key
+					Num:        1,
 				},
 			)
 
@@ -698,4 +756,141 @@ func BenchmarkWindowErrorPath(b *testing.B) {
 	b.StopTimer()
 
 	close(in)
+}
+
+type joinBenchmarkCase struct {
+	name           string
+	keyCardinality int     // How many unique keys to generate
+	joinRatio      float64 // 0.0 (no joins) to 1.0 (all records join)
+	windowDur      time.Duration
+	bufferSize     int
+	concurrency    int
+}
+
+func BenchmarkJoinKeyCardinality(b *testing.B) {
+	testCases := []joinBenchmarkCase{
+		{name: "Keys=2", keyCardinality: 2, joinRatio: 0.5, windowDur: 50 * time.Millisecond, bufferSize: 100},
+		{name: "Keys=10", keyCardinality: 10, joinRatio: 0.5, windowDur: 50 * time.Millisecond, bufferSize: 100},
+		{name: "Keys=100", keyCardinality: 100, joinRatio: 0.5, windowDur: 50 * time.Millisecond, bufferSize: 100},
+		{name: "Keys=1000", keyCardinality: 1000, joinRatio: 0.5, windowDur: 50 * time.Millisecond, bufferSize: 100},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			runJoinBenchmark(b, tc)
+		})
+	}
+}
+
+func BenchmarkJoinRatio(b *testing.B) {
+	testCases := []joinBenchmarkCase{
+		{name: "Ratio=0.01", keyCardinality: 10, joinRatio: 0.01, windowDur: 50 * time.Millisecond, bufferSize: 100},
+		{name: "Ratio=0.1", keyCardinality: 10, joinRatio: 0.1, windowDur: 50 * time.Millisecond, bufferSize: 100},
+		{name: "Ratio=0.5", keyCardinality: 10, joinRatio: 0.5, windowDur: 50 * time.Millisecond, bufferSize: 100},
+		{name: "Ratio=1.0", keyCardinality: 10, joinRatio: 1.0, windowDur: 50 * time.Millisecond, bufferSize: 100},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			runJoinBenchmark(b, tc)
+		})
+	}
+}
+
+func BenchmarkJoinThroughput(b *testing.B) {
+	testCases := []joinBenchmarkCase{
+		{name: "LowCardinality_LowRatio", keyCardinality: 2, joinRatio: 0.1, windowDur: 100 * time.Millisecond, bufferSize: 100},
+		{name: "HighCardinality_LowRatio", keyCardinality: 1000, joinRatio: 0.1, windowDur: 100 * time.Millisecond, bufferSize: 100},
+		{name: "LowCardinality_HighRatio", keyCardinality: 2, joinRatio: 0.9, windowDur: 100 * time.Millisecond, bufferSize: 100},
+		{name: "HighCardinality_HighRatio", keyCardinality: 1000, joinRatio: 0.9, windowDur: 100 * time.Millisecond, bufferSize: 100},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			runJoinBenchmark(b, tc)
+		})
+	}
+}
+
+func runJoinBenchmark(b *testing.B, tc joinBenchmarkCase) {
+	// 1) Setup
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	leftIn := make(chan testStruct, tc.bufferSize)
+	rightIn := make(chan testDatum, tc.bufferSize)
+	errCh := make(chan error, 1)
+
+	// Create the two initial DataStreams
+	leftStream := New[testStruct](ctx, leftIn, errCh)
+	rightStream := New[testDatum](ctx, rightIn, errCh)
+
+	// Key both streams by ID % keyCardinality
+	leftKeyed := KeyBy[testStruct, int](
+		leftStream,
+		func(t testStruct) int { return t.ID % tc.keyCardinality },
+	)
+	rightKeyed := KeyBy[testDatum, int](
+		rightStream,
+		func(t testDatum) int { return t.ID % tc.keyCardinality },
+	)
+
+	// Simple WindowFunc that counts matches
+	wf := func(batch []KeyableUnion[testStruct, testDatum, int]) (int, error) {
+		matched := 0
+		elems := make(map[int]bool)
+		for _, item := range batch {
+			var key int
+			if left := item.Left(); left != nil {
+				key = left.Key()
+			}
+			if right := item.Right(); right != nil {
+				key = right.Key()
+			}
+			if _, exists := elems[key]; exists {
+				matched++
+			} else {
+				elems[key] = true
+			}
+		}
+		return matched, nil
+	}
+
+	partitioner, err := windower.NewIntervalFactory[KeyableUnion[testStruct, testDatum, int]](tc.windowDur)
+	require.NoError(b, err)
+
+	// The Join pipeline itself
+	joinedStream := Join[testStruct, testDatum, int, int](
+		leftKeyed,
+		rightKeyed,
+		wf,
+		partitioner,
+		Params{BufferSize: tc.bufferSize, Num: tc.concurrency},
+	)
+
+	go drain(joinedStream.OrDone().Out())
+
+	// 2) Measure
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Push a left item
+		leftIn <- testStruct{ID: i, Name: "left"}
+
+		// Push a right item based on the join ratio
+		// We give it a slightly different ID to simulate non-identical records
+		// that still share the same key.
+		if b.N%int(1.0/tc.joinRatio) == 0 {
+			rightIn <- testDatum{ID: i, Data: "right"}
+		}
+	}
+	b.StopTimer()
+
+	// 3) Teardown
+	close(leftIn)
+	close(rightIn)
+}
+
+func drain[T any](ch <-chan T) {
+	for range ch {
+	}
 }

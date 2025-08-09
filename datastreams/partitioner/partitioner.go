@@ -126,12 +126,13 @@ func (m *manager[T, K]) Partition(keyFunc func(T) K, inStreams []<-chan T) Parti
 }
 
 func (m *manager[T, K]) push(key K, value T) {
-	p, ok := m.store.get(key)
+	p, ok := m.store.partitions.Load(key)
 	if !ok {
-		p = m.factory(m.ctx, m.senders, m.errs)
-		m.store.set(key, p)
+		newPartition := m.factory(m.ctx, m.senders, m.errs)
+		p, _ = m.store.partitions.LoadOrStore(key, newPartition)
 	}
 
+	partition := p.(Partition[T])
 	eventTime := time.Now()
 	if m.timeMarker != nil {
 		eventTime = m.timeMarker.Now()
@@ -141,17 +142,20 @@ func (m *manager[T, K]) push(key K, value T) {
 		m.generator.OnEvent(value, eventTime)
 	}
 
-	p.Push(value)
+	partition.Push(value)
 }
 
 func (m *manager[T, K]) Keys() []K {
-	m.store.mu.RLock()
-	defer m.store.mu.RUnlock()
+	// We can't pre-allocate capacity because sync.Map doesn't expose its length.
+	var keys []K
 
-	keys := make([]K, 0, len(m.store.partitions))
-	for k := range m.store.partitions {
-		keys = append(keys, k)
-	}
+	m.store.partitions.Range(func(key, value any) bool {
+		if k, ok := key.(K); ok {
+			keys = append(keys, k)
+		}
+		return true
+	})
+
 	return keys
 }
 

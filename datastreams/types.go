@@ -26,6 +26,6 @@ type WindowFunc[T any, R any] func([]T) (R, error)
 
 // JoinFunc is a user defined function that takes two values of type T and U and returns a value of type R.
 // This function is used to join two keyed data streams by key.
-type JoinFunc[T any, U any, K comparable, R any] func([]KeyableUnion[T, U, K]) (R, error)
+type JoinFunc[T any, U any, R any] func(T, U) (R, error)
 
 type RouteFunc[T any, RouteKey comparable] func(T) (RouteKey, error)

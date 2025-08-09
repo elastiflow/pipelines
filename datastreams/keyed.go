@@ -1,8 +1,9 @@
 package datastreams
 
 import (
-	"github.com/elastiflow/pipelines/datastreams/partitioner"
 	"time"
+
+	"github.com/elastiflow/pipelines/datastreams/partitioner"
 )
 
 // KeyedDataStream represents a stream of data elements partitioned by a key of type K, derived using a key function.
@@ -165,7 +166,7 @@ func mergeLeft[T any, U any, K comparable](keyedDs KeyedDataStream[T, K], outCha
 				case <-keyedDs.ctx.Done():
 					return
 				default:
-					outStream <- &either[T, U, K]{
+					outStream <- &keyableUnion[T, U, K]{
 						left: newKeyable(item, keyedDs.keyFunc),
 						ts:   time.Now(),
 					}
@@ -185,7 +186,7 @@ func mergeRight[T any, U any, K comparable](keyedDs KeyedDataStream[U, K], outCh
 				case <-keyedDs.ctx.Done():
 					return
 				default:
-					outStream <- &either[T, U, K]{
+					outStream <- &keyableUnion[T, U, K]{
 						right: newKeyable(event, keyedDs.keyFunc),
 						ts:    time.Now(),
 					}
@@ -209,17 +210,17 @@ type KeyableUnion[T any, U any, K comparable] interface {
 	Union[Keyable[T, K], Keyable[U, K]]
 }
 
-type either[T any, U any, K comparable] struct {
+type keyableUnion[T any, U any, K comparable] struct {
 	left  Keyable[T, K]
 	right Keyable[U, K]
 	ts    time.Time
 }
 
-func (r *either[T, U, K]) Left() Keyable[T, K] {
+func (r *keyableUnion[T, U, K]) Left() Keyable[T, K] {
 	return r.left
 }
 
-func (r *either[T, U, K]) Right() Keyable[U, K] {
+func (r *keyableUnion[T, U, K]) Right() Keyable[U, K] {
 	return r.right
 }
 

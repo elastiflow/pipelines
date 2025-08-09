@@ -1,30 +1,16 @@
 package partitioner
 
-import (
-	"sync"
-)
+import "sync"
 
 type store[T any, K comparable] struct {
-	partitions map[K]Partition[T]
-	mu         sync.RWMutex
+	partitions sync.Map
 }
 
 func newStore[T any, K comparable]() *store[T, K] {
-	return &store[T, K]{
-		partitions: make(map[K]Partition[T]),
-	}
+	return &store[T, K]{}
 }
 
-func (s *store[T, K]) get(k K) (Partition[T], bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	w, ok := s.partitions[k]
-	return w, ok
-}
-
-func (s *store[T, K]) set(k K, w Partition[T]) Partition[T] {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.partitions[k] = w
-	return w
+func (s *store[T, K]) LoadOrStore(k K, p Partition[T]) (actual Partition[T], loaded bool) {
+	res, loaded := s.partitions.LoadOrStore(k, p)
+	return res.(Partition[T]), loaded
 }
