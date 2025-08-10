@@ -7,6 +7,31 @@ import (
 	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
 
+type Keyable[T any, K comparable] interface {
+	Key() K
+	Value() T
+}
+
+type keyable[T any, K comparable] struct {
+	value T
+	key   K
+}
+
+func NewKeyable[T any, K comparable](t T, key K) Keyable[T, K] {
+	return &keyable[T, K]{
+		value: t,
+		key:   key,
+	}
+}
+
+func (k keyable[T, K]) Key() K {
+	return k.key
+}
+
+func (k keyable[T, K]) Value() T {
+	return k.value
+}
+
 type Batch[T any] struct {
 	items []T
 	mu    sync.RWMutex

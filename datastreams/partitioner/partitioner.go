@@ -39,7 +39,7 @@ type Partitioner[T any, K comparable] interface {
 	Keys() []K
 
 	// Partition starts partitioning the input streams using the provided key function.
-	Partition(keyFunc func(T) K, inStreams []<-chan T) Partitioner[T, K]
+	Partition(inStreams []<-chan Keyable[T, K]) Partitioner[T, K]
 }
 
 type Builder[T any, K comparable] struct {
@@ -93,20 +93,20 @@ func New[T any, K comparable](
 
 type manager[T any, K comparable] struct {
 	ctx        context.Context
-	wg         *sync.WaitGroup
 	errs       chan<- error
 	factory    Factory[T]
 	generator  WatermarkGenerator[T]
+	keyFunc    func(T) K
 	senders    pipes.Senders[[]T]
 	store      *store[T, K]
 	timeMarker TimeMarker
-	keyFunc    func(T) K
+	wg         *sync.WaitGroup
 }
 
-func (m *manager[T, K]) Partition(keyFunc func(T) K, inStreams []<-chan T) Partitioner[T, K] {
+func (m *manager[T, K]) Partition(inStreams []<-chan Keyable[T, K]) Partitioner[T, K] {
 	for _, in := range inStreams {
 		m.incrementWaitGroup(1)
-		go func(ctx context.Context, inStream <-chan T) {
+		go func(ctx context.Context, inStream <-chan Keyable[T, K]) {
 			defer m.decrementWaitGroup()
 			for {
 				select {
@@ -116,8 +116,7 @@ func (m *manager[T, K]) Partition(keyFunc func(T) K, inStreams []<-chan T) Parti
 					if !ok {
 						return
 					}
-					key := keyFunc(item)
-					m.push(key, item)
+					m.push(item.Key(), item.Value())
 				}
 			}
 		}(m.ctx, in)

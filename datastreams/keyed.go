@@ -8,8 +8,7 @@ import (
 
 // KeyedDataStream represents a stream of data elements partitioned by a key of type K, derived using a key function.
 type KeyedDataStream[T any, K comparable] struct {
-	DataStream[T]
-	keyFunc     KeyFunc[T, K]
+	DataStream[partitioner.Keyable[T, K]]
 	waterMarker partitioner.WatermarkGenerator[T]
 	timeMarker  partitioner.TimeMarker
 }
@@ -38,15 +37,14 @@ func KeyBy[T any, K comparable](
 	params ...Params,
 ) KeyedDataStream[T, K] {
 	param := applyParams(params...)
-	nextPipe, outChannels := next[T](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
+	nextPipe, outChannels := next[partitioner.Keyable[T, K]](standard, param, len(ds.inStreams), ds.ctx, ds.errStream, ds.wg)
 	kds := KeyedDataStream[T, K]{
 		DataStream: nextPipe,
-		keyFunc:    keyFunc,
 	}
 
 	for i, inStream := range ds.inStreams {
 		ds.incrementWaitGroup(1)
-		go func(inStream <-chan T, outChannel chan<- T) {
+		go func(inStream <-chan T, outChannel chan<- partitioner.Keyable[T, K]) {
 			defer ds.decrementWaitGroup()
 			defer close(outChannel)
 			for {
@@ -58,7 +56,7 @@ func KeyBy[T any, K comparable](
 						return
 					}
 					select {
-					case outChannel <- item:
+					case outChannel <- partitioner.NewKeyable[T, K](item, keyFunc(item)):
 					case <-ds.ctx.Done():
 						return
 					}
@@ -89,7 +87,7 @@ func Window[T any, K comparable, R any](
 		WithWatermarkGenerator(keyedDs.waterMarker).
 		WithTimeMarker(keyedDs.timeMarker).
 		Build().
-		Partition(keyedDs.keyFunc, keyedDs.inStreams)
+		Partition(keyedDs.inStreams)
 
 	for i, in := range windowPipe.inStreams {
 		keyedDs.incrementWaitGroup(1)
@@ -124,18 +122,18 @@ func Window[T any, K comparable, R any](
 func Join[T any, U any, K comparable, R any](
 	left KeyedDataStream[T, K],
 	right KeyedDataStream[U, K],
-	wf WindowFunc[KeyableUnion[T, U, K], R],
-	pf partitioner.Factory[KeyableUnion[T, U, K]],
+	wf WindowFunc[KeyedUnion[T, U, K], R],
+	pf partitioner.Factory[KeyedUnion[T, U, K]],
 	param ...Params,
 ) DataStream[R] {
 	p := applyParams(param...)
-	joinPipe, joinPipeOutChan := next[KeyableUnion[T, U, K]](standard, p, len(left.inStreams), left.ctx, left.errStream, left.wg)
+	joinPipe, joinPipeOutChan := next[KeyedUnion[T, U, K]](standard, p, len(left.inStreams), left.ctx, left.errStream, left.wg)
 	mergeLeft[T, U, K](left, joinPipeOutChan.Senders())
 	mergeRight[T, U, K](right, joinPipeOutChan.Senders())
 
-	kds := KeyBy[KeyableUnion[T, U, K], K](
+	kds := KeyBy[KeyedUnion[T, U, K], K](
 		joinPipe,
-		func(rec KeyableUnion[T, U, K]) (key K) {
+		func(rec KeyedUnion[T, U, K]) (key K) {
 			if rec.Left() != nil {
 				return rec.Left().Key()
 			}
@@ -147,7 +145,7 @@ func Join[T any, U any, K comparable, R any](
 		},
 	)
 
-	return Window[KeyableUnion[T, U, K], K, R](
+	return Window[KeyedUnion[T, U, K], K, R](
 		kds,
 		wf,
 		pf,
@@ -156,94 +154,96 @@ func Join[T any, U any, K comparable, R any](
 
 }
 
-func mergeLeft[T any, U any, K comparable](keyedDs KeyedDataStream[T, K], outChans []chan<- KeyableUnion[T, U, K]) {
-	for i, in := range keyedDs.inStreams {
-		keyedDs.incrementWaitGroup(1)
-		go func(inStream <-chan T, outStream chan<- KeyableUnion[T, U, K]) {
-			defer keyedDs.decrementWaitGroup()
-			for item := range inStream {
+func mergeLeft[T any, U any, K comparable](left KeyedDataStream[T, K], outChans []chan<- KeyedUnion[T, U, K]) {
+	for i, in := range left.inStreams {
+		left.incrementWaitGroup(1)
+		go func(inStream <-chan partitioner.Keyable[T, K], outStream chan<- KeyedUnion[T, U, K]) {
+			defer left.decrementWaitGroup()
+			for event := range inStream {
 				select {
-				case <-keyedDs.ctx.Done():
+				case <-left.ctx.Done():
 					return
 				default:
-					outStream <- &keyableUnion[T, U, K]{
-						left: newKeyable(item, keyedDs.keyFunc),
-						ts:   time.Now(),
-					}
+					outStream <- NewKeyedUnion[T, U, K](
+						event,
+						nil,
+						time.Now(),
+					)
 				}
 			}
 		}(in, outChans[i])
 	}
 }
 
-func mergeRight[T any, U any, K comparable](keyedDs KeyedDataStream[U, K], outChans []chan<- KeyableUnion[T, U, K]) {
+func mergeRight[T any, U any, K comparable](keyedDs KeyedDataStream[U, K], outChans []chan<- KeyedUnion[T, U, K]) {
 	for i, in := range keyedDs.inStreams {
 		keyedDs.incrementWaitGroup(1)
-		go func(inStream <-chan U, outStream chan<- KeyableUnion[T, U, K]) {
+		go func(inStream <-chan partitioner.Keyable[U, K], outStream chan<- KeyedUnion[T, U, K]) {
 			defer keyedDs.decrementWaitGroup()
 			for event := range inStream {
 				select {
 				case <-keyedDs.ctx.Done():
 					return
 				default:
-					outStream <- &keyableUnion[T, U, K]{
-						right: newKeyable(event, keyedDs.keyFunc),
-						ts:    time.Now(),
-					}
+					outStream <- NewKeyedUnion[T, U, K](
+						nil,
+						event,
+						time.Now(),
+					)
 				}
 			}
 		}(in, outChans[i])
 	}
 }
 
-type Keyable[T any, K comparable] interface {
-	Key() K
-	Value() T
-}
-
 type Union[T any, U any] interface {
 	Left() T
 	Right() U
+	TS() time.Time
 }
 
-type KeyableUnion[T any, U any, K comparable] interface {
-	Union[Keyable[T, K], Keyable[U, K]]
-}
-
-type keyableUnion[T any, U any, K comparable] struct {
-	left  Keyable[T, K]
-	right Keyable[U, K]
+type union[T any, U any] struct {
+	left  T
+	right U
 	ts    time.Time
 }
 
-func (r *keyableUnion[T, U, K]) Left() Keyable[T, K] {
-	return r.left
-}
-
-func (r *keyableUnion[T, U, K]) Right() Keyable[U, K] {
-	return r.right
-}
-
-type keyable[T any, K comparable] struct {
-	value   T
-	keyFunc func(T) K
-}
-
-func newKeyable[T any, K comparable](
-	t T,
-	keyFunc func(T) K,
-) Keyable[T, K] {
-	return &keyable[T, K]{
-		value:   t,
-		keyFunc: keyFunc,
+func NewUnion[T any, U any](
+	left T,
+	right U,
+	ts time.Time,
+) Union[T, U] {
+	return &union[T, U]{
+		left:  left,
+		right: right,
+		ts:    ts,
 	}
-
 }
 
-func (k *keyable[T, K]) Key() K {
-	return k.keyFunc(k.value)
+func (k *union[T, U]) Left() T {
+	return k.left
 }
 
-func (k *keyable[T, K]) Value() T {
-	return k.value
+func (k *union[T, U]) Right() U {
+	return k.right
+}
+
+func (k *union[T, U]) TS() time.Time {
+	return k.ts
+}
+
+type KeyedUnion[T any, U any, K comparable] interface {
+	Union[partitioner.Keyable[T, K], partitioner.Keyable[U, K]]
+}
+
+func NewKeyedUnion[T any, U any, K comparable](
+	left partitioner.Keyable[T, K],
+	right partitioner.Keyable[U, K],
+	ts time.Time,
+) KeyedUnion[T, U, K] {
+	return NewUnion[partitioner.Keyable[T, K], partitioner.Keyable[U, K]](
+		left,
+		right,
+		ts,
+	)
 }

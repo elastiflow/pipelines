@@ -81,7 +81,7 @@ func TestKeyBy(t *testing.T) {
 
 			out := make([]int, 0)
 			for res := range kds.OrDone().Out() {
-				out = append(out, res.ID)
+				out = append(out, res.Value().ID)
 			}
 			assert.Len(t, out, 5)
 		})
@@ -191,7 +191,7 @@ func TestJoin(t *testing.T) {
 		name          string
 		left          []*UserName
 		right         []*UserAge
-		process       func(t []KeyableUnion[*UserAge, *UserName, int]) (*User, error)
+		process       func(t []KeyedUnion[*UserAge, *UserName, int]) (*User, error)
 		expected      []*User
 		throttleLeft  time.Duration
 		throttleRight time.Duration
@@ -230,7 +230,7 @@ func TestJoin(t *testing.T) {
 					Name: "some-other",
 				},
 			},
-			process: func(t []KeyableUnion[*UserAge, *UserName, int]) (*User, error) {
+			process: func(t []KeyedUnion[*UserAge, *UserName, int]) (*User, error) {
 				u := &User{}
 				for _, rec := range t {
 					if left := rec.Left(); left != nil {
@@ -286,7 +286,7 @@ func TestJoin(t *testing.T) {
 					User: 3,
 				},
 			},
-			process: func(t []KeyableUnion[*UserAge, *UserName, int]) (*User, error) {
+			process: func(t []KeyedUnion[*UserAge, *UserName, int]) (*User, error) {
 				u := &User{}
 				for _, rec := range t {
 					if left := rec.Left(); left != nil {
@@ -340,7 +340,7 @@ func TestJoin(t *testing.T) {
 				},
 			},
 			throttleRight: 600 * time.Millisecond,
-			process: func(t []KeyableUnion[*UserAge, *UserName, int]) (*User, error) {
+			process: func(t []KeyedUnion[*UserAge, *UserName, int]) (*User, error) {
 				u := &User{}
 				for _, rec := range t {
 					if left := rec.Left(); left != nil {
@@ -380,7 +380,7 @@ func TestJoin(t *testing.T) {
 				}
 			}(ctx, tt.right)
 
-			partitioner, err := windower.NewIntervalFactory[KeyableUnion[*UserAge, *UserName, int]](500 * time.Millisecond)
+			p, err := windower.NewIntervalFactory[KeyedUnion[*UserAge, *UserName, int]](500 * time.Millisecond)
 			require.NoError(t, err)
 			left := KeyBy[*UserName, int](
 				New[*UserName](ctx, leftStream, errCh),
@@ -408,7 +408,7 @@ func TestJoin(t *testing.T) {
 				right,
 				left,
 				tt.process,
-				partitioner,
+				p,
 				Params{
 					BufferSize: 50,
 				},
@@ -836,7 +836,7 @@ func runJoinBenchmark(b *testing.B, tc joinBenchmarkCase) {
 	)
 
 	// Simple WindowFunc that counts matches
-	wf := func(batch []KeyableUnion[testStruct, testDatum, int]) (int, error) {
+	wf := func(batch []KeyedUnion[testStruct, testDatum, int]) (int, error) {
 		matched := 0
 		elems := make(map[int]bool)
 		for _, item := range batch {
@@ -856,7 +856,7 @@ func runJoinBenchmark(b *testing.B, tc joinBenchmarkCase) {
 		return matched, nil
 	}
 
-	partitioner, err := windower.NewIntervalFactory[KeyableUnion[testStruct, testDatum, int]](tc.windowDur)
+	p, err := windower.NewIntervalFactory[KeyedUnion[testStruct, testDatum, int]](tc.windowDur)
 	require.NoError(b, err)
 
 	// The Join pipeline itself
@@ -864,7 +864,7 @@ func runJoinBenchmark(b *testing.B, tc joinBenchmarkCase) {
 		leftKeyed,
 		rightKeyed,
 		wf,
-		partitioner,
+		p,
 		Params{BufferSize: tc.bufferSize, Num: tc.concurrency},
 	)
 
