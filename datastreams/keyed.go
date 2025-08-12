@@ -81,17 +81,23 @@ func Window[T any, K comparable, R any](
 	p := applyParams(param...)
 	nextPipe, outChans := next[R](standard, p, len(keyedDs.inStreams), keyedDs.ctx, keyedDs.errStream, keyedDs.wg)
 	windowPipe, windowOutChan := next[[]T](standard, p, len(keyedDs.inStreams), keyedDs.ctx, keyedDs.errStream, keyedDs.wg)
-	pm := partition.NewPartitioner[T, K](
+	pm := partition.NewPartitionManager[T, K](
 		keyedDs.ctx,
 		windowOutChan.Senders(),
-		pf,
-		keyedDs.timeMarker,
-		keyedDs.waterMarker,
+		partition.ManagerOpts[T, K]{
+			ShardOpts: &partition.ShardedStoreOpts[K]{
+				ShardKeyFunc: partition.ModulusHash[K],
+				ShardCount:   p.ShardCount,
+			},
+			TimeMarker:   keyedDs.timeMarker,
+			WatermarkGen: keyedDs.waterMarker,
+			Factory:      pf,
+		},
 	)
 
 	for _, in := range keyedDs.inStreams {
 		keyedDs.incrementWaitGroup(1)
-		go func(ctx context.Context, pm partition.Partitioner[T, K], inStream <-chan T) {
+		go func(ctx context.Context, pm *partition.Manager[T, K], inStream <-chan T) {
 			defer keyedDs.decrementWaitGroup()
 			for {
 				select {

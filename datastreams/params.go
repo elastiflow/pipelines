@@ -6,4 +6,5 @@ type Params struct {
 	BufferSize  int
 	SkipError   bool
 	SegmentName string
+	ShardCount  int
 }

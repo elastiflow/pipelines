@@ -12,7 +12,6 @@ type TimeMarker interface {
 }
 
 type Partition[T any] interface {
-	// Push is called to send an item to the partition.
 	Push(item T)
 }
 
@@ -32,68 +31,53 @@ type Factory[T any] func(
 	errs chan<- error,
 ) Partition[T]
 
-type manager[T any, K comparable] struct {
-	ctx        context.Context
-	errs       chan<- error
-	factory    Factory[T]
-	generator  WatermarkGenerator[T]
-	senders    pipes.Senders[[]T]
-	store      *store[T, K]
-	timeMarker TimeMarker
+type Manager[T any, K comparable] struct {
+	ctx     context.Context
+	errs    chan<- error
+	senders pipes.Senders[[]T]
+	store   *ShardedStore[T, K]
+	ManagerOpts[T, K]
 }
 
-type Partitioner[T any, K comparable] interface {
-	// Partition is called to send an item to the appropriate partition.
-	//  Key: the key to partition by
-	//  Value: the value to send
-	Partition(key K, value T)
-	// Keys returns the keys of the partitions.
-	Keys() []K
+type ManagerOpts[T any, K comparable] struct {
+	TimeMarker   TimeMarker
+	WatermarkGen WatermarkGenerator[T]
+	Factory      Factory[T]
+	ShardOpts    *ShardedStoreOpts[K]
 }
 
-func NewPartitioner[T any, K comparable](
+func NewPartitionManager[T any, K comparable](
 	ctx context.Context,
 	senders pipes.Senders[[]T],
-	factory Factory[T],
-	timeMarker TimeMarker,
-	generator WatermarkGenerator[T],
-) Partitioner[T, K] {
-	return &manager[T, K]{
-		ctx:        ctx,
-		factory:    factory,
-		generator:  generator,
-		store:      newStore[T, K](),
-		timeMarker: timeMarker,
-		senders:    senders,
+	opts ManagerOpts[T, K],
+) *Manager[T, K] {
+	return &Manager[T, K]{
+		ctx:         ctx,
+		ManagerOpts: opts,
+		store:       NewShardedStore[T, K](opts.ShardOpts),
+		senders:     senders,
 	}
 }
 
-func (m *manager[T, K]) Partition(key K, value T) {
-	p, ok := m.store.get(key)
+func (m *Manager[T, K]) Partition(key K, value T) {
+	p, ok := m.store.Get(key)
 	if !ok {
-		p = m.factory(m.ctx, m.senders, m.errs)
-		m.store.set(key, p)
+		p = m.Factory(m.ctx, m.senders, m.errs)
+		m.store.Set(key, p)
 	}
 
 	eventTime := time.Now()
-	if m.timeMarker != nil {
-		eventTime = m.timeMarker.Now()
+	if m.TimeMarker != nil {
+		eventTime = m.TimeMarker.Now()
 	}
 
-	if m.generator != nil {
-		m.generator.OnEvent(value, eventTime)
+	if m.WatermarkGen != nil {
+		m.WatermarkGen.OnEvent(value, eventTime)
 	}
 
 	p.Push(value)
 }
 
-func (m *manager[T, K]) Keys() []K {
-	m.store.mu.RLock()
-	defer m.store.mu.RUnlock()
-
-	keys := make([]K, 0, len(m.store.partitions))
-	for k := range m.store.partitions {
-		keys = append(keys, k)
-	}
-	return keys
+func (m *Manager[T, K]) Keys() []K {
+	return m.store.Keys()
 }

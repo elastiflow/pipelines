@@ -109,25 +109,30 @@ func TestPartitioner_Partition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// fresh store each test
-			mgr := NewPartitioner[int, string](
+			mgr := NewPartitionManager[int, string](
 				context.Background(),
 				output.Senders(),
-				func(ctx context.Context, out pipes.Senders[[]int], errs chan<- error) Partition[int] {
-					return &mockPartition[int]{}
+				ManagerOpts[int, string]{
+					ShardOpts: &ShardedStoreOpts[string]{
+						ShardKeyFunc: ModulusHash[string],
+						ShardCount:   2,
+					},
+					Factory: func(ctx context.Context, out pipes.Senders[[]int], errs chan<- error) Partition[int] {
+						return &mockPartition[int]{}
+					},
+					TimeMarker: func() TimeMarker {
+						if tt.timeMarker != nil {
+							return tt.timeMarker
+						}
+						return nil
+					}(),
+					WatermarkGen: func() WatermarkGenerator[int] {
+						if tt.watermarker != nil {
+							return tt.watermarker
+						}
+						return nil
+					}(),
 				},
-				func() TimeMarker {
-					if tt.timeMarker != nil {
-						return tt.timeMarker
-					}
-					return nil
-				}(),
-				func() WatermarkGenerator[int] {
-					if tt.watermarker != nil {
-						return tt.watermarker
-					}
-					return nil
-				}(),
 			)
 
 			if tt.configMocks != nil {

@@ -8,16 +8,19 @@ import (
 
 // mockPartition is a test double for Partition[T, R]
 func TestStore_SetAndGet(t *testing.T) {
-	s := newStore[int, string]()
+	s := NewShardedStore[int, string](&ShardedStoreOpts[string]{
+		ShardCount:   2,
+		ShardKeyFunc: JumpHash[string],
+	})
 
 	p1 := &mockPartition[int]{}
 	p2 := &mockPartition[int]{}
 
-	s.set("foo", p1)
-	s.set("bar", p2)
+	s.Set("foo", p1)
+	s.Set("bar", p2)
 
-	got1, ok1 := s.get("foo")
-	got2, ok2 := s.get("bar")
+	got1, ok1 := s.Get("foo")
+	got2, ok2 := s.Get("bar")
 
 	assert.True(t, ok1)
 	assert.True(t, ok2)
@@ -26,7 +29,10 @@ func TestStore_SetAndGet(t *testing.T) {
 }
 
 func TestStore_GetMissingKey(t *testing.T) {
-	s := newStore[int, string]()
-	_, ok := s.get("nonexistent")
+	s := NewShardedStore[int, string](&ShardedStoreOpts[string]{
+		ShardCount:   2,
+		ShardKeyFunc: ModulusHash[string],
+	})
+	_, ok := s.Get("nonexistent")
 	assert.False(t, ok)
 }
