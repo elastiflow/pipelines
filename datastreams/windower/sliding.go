@@ -2,10 +2,11 @@ package windower
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 )

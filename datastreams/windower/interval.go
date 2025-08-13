@@ -2,8 +2,9 @@ package windower
 
 import (
 	"context"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"time"
+
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
 )
