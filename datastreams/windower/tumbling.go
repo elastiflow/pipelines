@@ -2,7 +2,6 @@ package windower
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"time"
 
@@ -28,46 +27,65 @@ func (s *status) tryStart() bool {
 	return s.started.CompareAndSwap(false, true)
 }
 
-// tumbling buffers items for windowDuration once the first item arrives.
-// After windowDuration, it publishes the batch and clears it, then waits
-// for the next item to start a new timer.
-type tumbling[T any] struct {
-	*partition.Base[T]
-	ctx            context.Context
+// Tumbling implements fixed-size, non-overlapping, sequential windows that are
+// triggered by the arrival of data. A new window is
+// created only when the first element arrives after a previous window has completed.
+//
+// The lifecycle is as follows:
+//  1. The window is idle, awaiting data.
+//  2. The first element arrives, immediately starting a timer for WindowDuration.
+//  3. All subsequent elements that arrive before the timer fires are collected into the active window.
+//  4. When the timer fires, the entire batch of collected elements is emitted (flushed).
+//  5. The window returns to an idle state, waiting for the next element to begin the cycle again.
+//
+//
+// Visualization
+//
+// ---[Item 1 Arrives]---(items being collected)---[Timer Fires, Window 1 Emits]---(idle)---[Item N Arrives]---
+//   |-------------------- Window 1 -------------------|                                  |---- Window 2 ----
+//   <------------------ WindowDuration ---------------->
+
+type Tumbling[T any] struct {
+	WindowDuration time.Duration
+	base           *partition.Base[T]
 	status         *status
-	windowDuration time.Duration
+	ctx            context.Context
 }
 
-// newTumbling constructs a tumbling window partition. The first Push
-// after a flush will start a new window timer.
-func newTumbling[T any](
-	ctx context.Context,
-	out pipes.Senders[[]T],
-	errs chan<- error,
+// NewTumbling constructs a Tumbling window partitioner.
+// Parameters:
+//   - windowDuration : The duration of each tumbling window.
+//     This is the time after which the collected items will be flushed.
+func NewTumbling[T any](
 	windowDuration time.Duration,
-) partition.Partition[T] {
-
-	t := &tumbling[T]{
-		Base:           partition.NewBase[T](out, errs),
-		windowDuration: windowDuration,
-		ctx:            ctx,
-		status:         newStatus(),
+) *Tumbling[T] {
+	return &Tumbling[T]{
+		WindowDuration: windowDuration,
 	}
-	return t
+}
+
+// Create initializes a new partition that will collect items until the
+// WindowDuration has elapsed. It returns a new partition that can be used to
+// push items into the buffer.
+func (t *Tumbling[T]) Create(ctx context.Context, out pipes.Senders[[]T], errs chan<- error) partition.Partition[T] {
+	newPartition := NewTumbling[T](t.WindowDuration)
+	newPartition.base = partition.NewBase[T](out, errs)
+	newPartition.status = newStatus()
+	newPartition.ctx = ctx
+	return newPartition
 }
 
 // Push adds to the current batch; if no timer is running, start one.
-func (t *tumbling[T]) Push(item T) {
-	t.Base.Push(item)
+func (t *Tumbling[T]) Push(item T) {
+	t.base.Push(item)
 
 	if t.status.tryStart() {
 		go t.waitAndFlush()
 	}
 }
 
-// waitAndFlush sleeps windowDuration, then flushes whatever is in the batch.
-func (t *tumbling[T]) waitAndFlush() {
-	timer := time.NewTimer(t.windowDuration)
+func (t *Tumbling[T]) waitAndFlush() {
+	timer := time.NewTimer(t.WindowDuration)
 	defer timer.Stop()
 
 	select {
@@ -75,26 +93,7 @@ func (t *tumbling[T]) waitAndFlush() {
 		t.status.tryStop()
 		return
 	case <-timer.C:
-		t.Base.FlushNext(t.ctx)
+		t.base.FlushNext(t.ctx)
 		t.status.tryStop()
 	}
-}
-
-// NewTumblingFactory constructs a factory function that can be used
-// to create new instances of tumbling. This is useful for
-// creating multiple instances with the same processing function and
-// window duration.
-func NewTumblingFactory[T any](
-	windowDuration time.Duration,
-) (partition.Factory[T], error) {
-	if windowDuration <= 0 {
-		return nil, errors.New("window duration must be greater than 0")
-	}
-	return func(
-		ctx context.Context,
-		out pipes.Senders[[]T],
-		errs chan<- error,
-	) partition.Partition[T] {
-		return newTumbling(ctx, out, errs, windowDuration)
-	}, nil
 }

@@ -2,13 +2,12 @@ package windower
 
 import (
 	"context"
-	"errors"
+	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/elastiflow/pipelines/datastreams/internal/partition"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 )
 
 // record pairs a value with the moment it arrived.
@@ -22,7 +21,7 @@ type slidingBatch[T any] struct {
 	mu    sync.RWMutex
 }
 
-// NewSlidingBatch constructs a new sliding batch.
+// NewSlidingBatch constructs a new Sliding batch.
 func newSlidingBatch[T any]() *slidingBatch[T] {
 	return &slidingBatch[T]{
 		items: make([]record[T], 0),
@@ -76,75 +75,89 @@ func (s *slidingBatch[T]) next(
 	return window
 }
 
-// sliding emits overlapping windows of size windowDuration,
-// every slideInterval apart.
-type sliding[T any] struct {
-	*partition.Base[T]
+// Sliding implements time-based, overlapping windows of a fixed duration.
+//
+//
+// The relationship between WindowDuration and SlideInterval determines the behavior:
+//
+//  ** (SlideInterval < WindowDuration): ** This is the classic
+//     sliding window where elements can belong to multiple windows.
+//
+//     Time ->
+//     |------- Window 1 -------|
+//         |------- Window 2 -------|
+//             |------- Window 3 -------|
+//     <--SI-->
+//     <---------- WindowDuration ---------->
+//
+// ** (SlideInterval == WindowDuration):** The windows are adjacent
+//     and do not overlap. This configuration behaves exactly an interval window.
+//
+//     |-- Window 1 --|-- Window 2 --|-- Window 3 --|
+//
+// ** (SlideInterval > WindowDuration): ** Some elements will be
+//     dropped as they fall in the gaps between the end of one window and the start of the next.
+//
+//     |-- Win 1 --|   (gap)   |-- Win 2 --|
+//
 
-	windowDuration time.Duration
-	slideInterval  time.Duration
-	sb             *slidingBatch[T]
+type Sliding[T any] struct {
+	WindowDuration time.Duration
+	SlideInterval  time.Duration
+
+	base *partition.Base[T]
+	sb   *slidingBatch[T]
 }
 
-// newSliding constructs a sliding window partition that starts ticking immediately.
-func newSliding[T any](
-	ctx context.Context,
-	out pipes.Senders[[]T],
-	errs chan<- error,
+// NewSliding constructs a Tumbling partitioner.
+// Parameters:
+//   - windowDuration : The duration of each tumbling window.
+//     This is the time after which the collected items will be flushed.
+//   - slideInterval  : The interval at which the window is slid forward.
+//     This determines how often the window is evaluated and flushed.
+func NewSliding[T any](
 	windowDuration, slideInterval time.Duration,
-) partition.Partition[T] {
-	s := &sliding[T]{
-		Base:           partition.NewBase[T](out, errs),
-		windowDuration: windowDuration,
-		slideInterval:  slideInterval,
-		sb:             newSlidingBatch[T](),
+) *Sliding[T] {
+	s := &Sliding[T]{
+		WindowDuration: windowDuration,
+		SlideInterval:  slideInterval,
 	}
-	go s.run(ctx)
 	return s
 }
 
+// Create initializes a new partition that will publish items
+// every `s.SlideInterval` duration, flushing the items collected in the
+// last `s.WindowDuration` duration. It returns a new partition
+// that can be used to push items into the buffer.
+func (s *Sliding[T]) Create(ctx context.Context, out pipes.Senders[[]T], errs chan<- error) partition.Partition[T] {
+	newPartition := NewSliding[T](s.WindowDuration, s.SlideInterval)
+	newPartition.base = partition.NewBase[T](out, errs)
+	newPartition.sb = newSlidingBatch[T]()
+	go newPartition.run(ctx)
+	return newPartition
+}
+
 // Push appends the item with its arrival timestamp.
-func (s *sliding[T]) Push(item T) {
+func (s *Sliding[T]) Push(item T) {
 	s.sb.push(item, time.Now())
 }
 
 // run drives the periodic flushes.
-func (s *sliding[T]) run(ctx context.Context) {
-	ticker := time.NewTicker(s.slideInterval)
+func (s *Sliding[T]) run(ctx context.Context) {
+	ticker := time.NewTicker(s.SlideInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			if next := s.sb.next(s.windowDuration, time.Now(), true); len(next) > 0 {
-				s.Flush(ctx, next)
+			if next := s.sb.next(s.WindowDuration, time.Now(), true); len(next) > 0 {
+				s.base.Flush(ctx, next)
 			}
 			return
 		case now := <-ticker.C:
-			if next := s.sb.next(s.windowDuration, now, false); len(next) > 0 {
-				s.Flush(ctx, next)
+			if next := s.sb.next(s.WindowDuration, now, false); len(next) > 0 {
+				s.base.Flush(ctx, next)
 			}
 		}
 	}
-}
-
-// NewSlidingFactory constructs a sliding window factory.
-func NewSlidingFactory[T any](
-	windowDuration, slideInterval time.Duration,
-) (partition.Factory[T], error) {
-	if windowDuration <= 0 || slideInterval <= 0 {
-		return nil, errors.New("window duration and slide interval must be greater than 0")
-
-	}
-	if slideInterval > windowDuration {
-		return nil, errors.New("slide interval must be less than or equal to window duration")
-	}
-
-	return func(
-		ctx context.Context,
-		out pipes.Senders[[]T],
-		errs chan<- error,
-	) partition.Partition[T] {
-		return newSliding(ctx, out, errs, windowDuration, slideInterval)
-	}, nil
 }

@@ -10,7 +10,6 @@ import (
 
 	"github.com/elastiflow/pipelines/datastreams/windower"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 type testStruct struct {
@@ -148,9 +147,7 @@ func TestWindow(t *testing.T) {
 				},
 			)
 
-			partitioner, err := windower.NewIntervalFactory[testStruct](500 * time.Millisecond)
-			require.NoError(t, err)
-
+			partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
 			out := Window[testStruct, int, testStruct](
 				kds,
 				tt.process,
@@ -197,8 +194,8 @@ func BenchmarkWindowThroughput(b *testing.B) {
 				}, nil
 			}
 
-			partitioner, err := windower.NewIntervalFactory[testStruct](50 * time.Millisecond)
-			require.NoError(b, err)
+			partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
+
 			win := Window[testStruct, int, testStruct](
 				kds,
 				windowFunc,
@@ -245,13 +242,11 @@ func BenchmarkWindowDuration(b *testing.B) {
 			widowFunc := func(batch []testStruct) (testStruct, error) {
 				return testStruct{}, nil
 			}
-			window, err := windower.NewIntervalFactory[testStruct](dur)
-			require.NoError(b, err)
 
 			win := Window[testStruct, int, testStruct](
 				kds,
 				widowFunc,
-				window,
+				windower.NewInterval[testStruct](dur),
 				Params{BufferSize: 50},
 			)
 
@@ -286,8 +281,8 @@ func BenchmarkWindowBufferSize(b *testing.B) {
 			widowFunc := func(batch []testStruct) (testStruct, error) {
 				return testStruct{}, nil
 			}
-			partitioner, err := windower.NewIntervalFactory[testStruct](50 * time.Millisecond)
-			require.NoError(b, err)
+			partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
+
 			win := Window[testStruct, int, testStruct](
 				kds,
 				widowFunc,
@@ -322,8 +317,7 @@ func BenchmarkWindowKeyCardinality(b *testing.B) {
 				func(t testStruct) int { return t.ID % K },
 				Params{BufferSize: 50, Num: 1},
 			)
-			partitioner, err := windower.NewIntervalFactory[testStruct](50 * time.Millisecond)
-			require.NoError(b, err)
+			partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
 
 			winFunc := func(batch []testStruct) (testStruct, error) { return testStruct{}, nil }
 			win := Window[testStruct, int, testStruct](
@@ -382,8 +376,7 @@ func BenchmarkWindowAggregatorComplexity(b *testing.B) {
 				Params{BufferSize: 50, Num: 1},
 			)
 
-			partitioner, err := windower.NewIntervalFactory[testStruct](50 * time.Millisecond)
-			require.NoError(b, err)
+			partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
 			win := Window[testStruct, int, testStruct](
 				kds,
 				agg,
@@ -424,8 +417,7 @@ func BenchmarkWindowConcurrency(b *testing.B) {
 					Params{BufferSize: 50, Num: M},
 				)
 				proc := func(batch []testStruct) (testStruct, error) { return testStruct{}, nil }
-				partitioner, err := windower.NewIntervalFactory[testStruct](50 * time.Millisecond)
-				require.NoError(b, err)
+				partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
 				win := Window[testStruct, int, testStruct](
 					kds,
 					proc,
@@ -465,8 +457,7 @@ func BenchmarkWindowErrorPath(b *testing.B) {
 		return testStruct{ID: batch[0].ID}, nil
 	}
 
-	partitioner, err := windower.NewIntervalFactory[testStruct](50 * time.Millisecond)
-	require.NoError(b, err)
+	partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
 
 	// Setup
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

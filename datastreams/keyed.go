@@ -75,7 +75,7 @@ func KeyBy[T any, K comparable](
 func Window[T any, K comparable, R any](
 	keyedDs KeyedDataStream[T, K],
 	wf WindowFunc[T, R],
-	pf partition.Factory[T],
+	partitioner partition.Partitioner[T],
 	param ...Params,
 ) DataStream[R] {
 	p := applyParams(param...)
@@ -91,7 +91,7 @@ func Window[T any, K comparable, R any](
 			},
 			TimeMarker:   keyedDs.timeMarker,
 			WatermarkGen: keyedDs.waterMarker,
-			Factory:      pf,
+			Partitioner:  partitioner,
 		},
 	)
 

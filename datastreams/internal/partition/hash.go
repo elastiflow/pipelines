@@ -48,6 +48,7 @@ func JumpHash[K comparable](k K, shardCount int) uint64 {
 }
 
 // toHashKey converts a comparable key into a 64-bit hash using FNV-1a hashing.
+// If the key is written to the hash fails, it returns 0 and get added to the default shard.
 func toHashKey[K comparable](k K) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(fmt.Sprint(k)))

@@ -18,6 +18,10 @@ type mockPartition[T any] struct {
 	closed bool
 }
 
+func (m *mockPartition[T]) Create(ctx context.Context, senders pipes.Senders[[]T], errs chan<- error) Partition[T] {
+	return m
+}
+
 func (m *mockPartition[T]) Push(item T) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -117,9 +121,7 @@ func TestPartitioner_Partition(t *testing.T) {
 						ShardKeyFunc: ModulusHash[string],
 						ShardCount:   2,
 					},
-					Factory: func(ctx context.Context, out pipes.Senders[[]int], errs chan<- error) Partition[int] {
-						return &mockPartition[int]{}
-					},
+					Partitioner: &mockPartition[int]{},
 					TimeMarker: func() TimeMarker {
 						if tt.timeMarker != nil {
 							return tt.timeMarker

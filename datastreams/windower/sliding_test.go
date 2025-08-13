@@ -12,72 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewSlidingFactory(t *testing.T) {
-	testcases := []struct {
-		name           string
-		windowDuration time.Duration
-		slideInterval  time.Duration
-		assertErr      func(t *testing.T, err error)
-		assert         func(t *testing.T, p partition.Factory[int])
-	}{
-		{
-			name:           "valid parameters",
-			windowDuration: 200 * time.Millisecond,
-			slideInterval:  50 * time.Millisecond,
-			assertErr: func(t *testing.T, err error) {
-				assert.NoError(t, err)
-			},
-			assert: func(t *testing.T, p partition.Factory[int]) {
-				assert.NotNil(t, p)
-			},
-		},
-		{
-			name:           "invalid window duration",
-			windowDuration: 0 * time.Millisecond,
-			slideInterval:  50 * time.Millisecond,
-			assertErr: func(t *testing.T, err error) {
-				assert.Error(t, err)
-				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
-			},
-			assert: func(t *testing.T, p partition.Factory[int]) {
-				assert.Nil(t, p)
-			},
-		},
-		{
-			name:           "invalid slide interval",
-			windowDuration: 200 * time.Millisecond,
-			slideInterval:  0 * time.Millisecond,
-			assertErr: func(t *testing.T, err error) {
-				assert.Error(t, err)
-				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
-			},
-			assert: func(t *testing.T, p partition.Factory[int]) {
-				assert.Nil(t, p)
-			},
-		},
-		{
-			name:           "invalid window duration and slide interval",
-			windowDuration: 0 * time.Millisecond,
-			slideInterval:  0 * time.Millisecond,
-			assertErr: func(t *testing.T, err error) {
-				assert.Error(t, err)
-				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
-			},
-			assert: func(t *testing.T, p partition.Factory[int]) {
-				assert.Nil(t, p)
-			},
-		},
-	}
-
-	for _, tc := range testcases {
-		t.Run(tc.name, func(t *testing.T) {
-			s, err := NewSlidingFactory[int](tc.windowDuration, tc.slideInterval)
-			tc.assertErr(t, err)
-			tc.assert(t, s)
-		})
-	}
-}
-
 func TestSlidingBatch_next(t *testing.T) {
 	type testCase[T any] struct {
 		name           string
@@ -175,7 +109,7 @@ func Test_newSliding(t *testing.T) {
 			shouldPanic:    false,
 			assert: func(t *testing.T, p partition.Partition[int]) {
 				assert.NotNil(t, p)
-				assert.IsType(t, &sliding[int]{}, p)
+				assert.IsType(t, &Sliding[int]{}, p)
 			},
 		},
 	}
@@ -191,7 +125,7 @@ func Test_newSliding(t *testing.T) {
 			out.Initialize(10)
 			defer out.Close()
 
-			s := newSliding[int](ctx, out.Senders(), errs, tc.windowDuration, tc.slideInterval)
+			s := NewSliding[int](tc.windowDuration, tc.slideInterval).Create(ctx, out.Senders(), errs)
 			tc.assert(t, s)
 		})
 	}
@@ -204,7 +138,7 @@ func BenchmarkSlidingWindow(b *testing.B) {
 	out := make(pipes.Pipes[[]int], 3)
 	out.Initialize(128)
 
-	w := newSliding[int](ctx, out.Senders(), errs, 100*time.Millisecond, 50*time.Millisecond)
+	w := NewSliding[int](100*time.Millisecond, 50*time.Millisecond).Create(ctx, out.Senders(), errs)
 
 	go func() {
 		for {

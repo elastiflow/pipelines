@@ -32,7 +32,7 @@ func TestNewInterval(t *testing.T) {
 			out.Initialize(10)
 			defer out.Close()
 
-			i := newInterval[int](ctx, out.Senders(), errs, tc.interval)
+			i := NewInterval[int](tc.interval).Create(ctx, out.Senders(), errs)
 			assert.NotNil(t, i)
 		})
 	}
@@ -73,8 +73,7 @@ func TestInterval_Flush(t *testing.T) {
 			out.Initialize(10)
 			defer out.Close()
 
-			w := newInterval[int](ctx, out.Senders(), errs, tc.interval)
-
+			w := NewInterval[int](tc.interval).Create(ctx, out.Senders(), errs)
 			go func() {
 				for i := 1; i <= tc.pushCount; i++ {
 					w.Push(i)

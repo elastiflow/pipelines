@@ -25,6 +25,24 @@ type WatermarkGenerator[T any] interface {
 	GetWatermark() time.Time
 }
 
+type Creator[T any] interface {
+	Create(
+		ctx context.Context,
+		senders pipes.Senders[[]T],
+		errs chan<- error,
+	) Partition[T]
+}
+
+type Pusher[T any] interface {
+	// Push sends an item to the partition.
+	Push(item T)
+}
+
+type Partitioner[T any] interface {
+	Creator[T]
+	Pusher[T]
+}
+
 type Factory[T any] func(
 	ctx context.Context,
 	senders pipes.Senders[[]T],
@@ -42,7 +60,7 @@ type Manager[T any, K comparable] struct {
 type ManagerOpts[T any, K comparable] struct {
 	TimeMarker   TimeMarker
 	WatermarkGen WatermarkGenerator[T]
-	Factory      Factory[T]
+	Partitioner  Partitioner[T]
 	ShardOpts    *ShardedStoreOpts[K]
 }
 
@@ -62,7 +80,7 @@ func NewPartitionManager[T any, K comparable](
 func (m *Manager[T, K]) Partition(key K, value T) {
 	p, ok := m.store.Get(key)
 	if !ok {
-		p = m.Factory(m.ctx, m.senders, m.errs)
+		p = m.Partitioner.Create(m.ctx, m.senders, m.errs)
 		m.store.Set(key, p)
 	}
 
