@@ -34,7 +34,7 @@ func Example_sliding() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	partitionFactory := windower.NewSliding[*SensorReading](150*time.Millisecond, 50*time.Millisecond)
+	partitionFactory := windower.NewSliding[*SensorReading, string](150*time.Millisecond, 50*time.Millisecond)
 	var sensorReadings = []*SensorReading{
 		{DeviceID: "device-1", Temp: 22.5, Humidity: 45.0, Timestamp: time.Now().Add(-6 * time.Second)},
 		{DeviceID: "device-1", Temp: 22.7, Humidity: 46.0, Timestamp: time.Now().Add(-5 * time.Second)},

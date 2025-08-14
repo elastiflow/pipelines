@@ -6,9 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elastiflow/pipelines/datastreams/internal/partition"
-
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -82,11 +79,11 @@ func TestSlidingBatch_next(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sb := &slidingBatch[int]{
+			sb := &SlidingBatch[int]{
 				items: tt.initialRecords, // copy to avoid mutation across cases
 				mu:    sync.RWMutex{},
 			}
-			got := sb.next(tt.windowDuration, tt.now, tt.final)
+			got := sb.Next(tt.windowDuration, tt.now, tt.final)
 
 			assert.Len(t, got, len(tt.want))
 			assert.ElementsMatch(t, got, tt.want, "unexpected result")
@@ -94,70 +91,98 @@ func TestSlidingBatch_next(t *testing.T) {
 	}
 }
 
-func Test_newSliding(t *testing.T) {
+func TestSliding(t *testing.T) {
 	testcases := []struct {
-		name           string
-		windowDuration time.Duration
-		slideInterval  time.Duration
-		shouldPanic    bool
-		assert         func(t *testing.T, p partition.Partition[int])
+		name         string
+		interval     time.Duration
+		slide        time.Duration
+		pushInterval time.Duration
+		pushCount    int
+		windowCount  int
 	}{
 		{
-			name:           "valid parameters",
-			windowDuration: 200 * time.Millisecond,
-			slideInterval:  50 * time.Millisecond,
-			shouldPanic:    false,
-			assert: func(t *testing.T, p partition.Partition[int]) {
-				assert.NotNil(t, p)
-				assert.IsType(t, &Sliding[int]{}, p)
-			},
+			name:         "interval: exactly two windows",
+			interval:     500 * time.Millisecond,
+			slide:        500 * time.Millisecond,
+			pushInterval: 100 * time.Millisecond,
+			pushCount:    8,
+			windowCount:  2,
+		},
+		{
+			name:         "No windows",
+			interval:     200 * time.Millisecond,
+			slide:        500 * time.Millisecond,
+			pushInterval: 0 * time.Millisecond,
+			pushCount:    0,
+			windowCount:  0,
+		},
+		{
+			name:         "Overlapping windows",
+			interval:     500 * time.Millisecond,
+			slide:        200 * time.Millisecond,
+			pushInterval: 100 * time.Millisecond,
+			pushCount:    8,
+			windowCount:  5,
 		},
 	}
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			defer cancel()
+			out := make(chan []int, 10)
+			s := NewSliding[int, string](tc.interval, tc.slide)
+			go func() {
+				defer close(out)
+				p := s.Create(context.Background(), out)
+				for i := 1; i <= tc.pushCount; i++ {
+					p.Push(newTestElement(i))
+					time.Sleep(tc.pushInterval)
+				}
+				s.Close()
+			}()
 
-			errs := make(chan error, 10)
-			out := make(pipes.Pipes[[]int], 1)
-			out.Initialize(10)
-			defer out.Close()
-
-			s := NewSliding[int](tc.windowDuration, tc.slideInterval).Create(ctx, out.Senders(), errs)
-			tc.assert(t, s)
+			var results [][]int
+			for w := range out {
+				results = append(results, w)
+			}
+			assert.Equal(t, tc.windowCount, len(results), "unexpected number of windows")
 		})
 	}
 }
-
+func TestNewSliding(t *testing.T) {
+	t.Parallel()
+	s := NewSliding[int, string](200*time.Millisecond, 50*time.Millisecond)
+	assert.NotNil(t, s)
+}
+func TestNewInterval(t *testing.T) {
+	out := make(chan []int, 10)
+	i := NewInterval[int, string](200*time.Millisecond).Create(context.Background(), out)
+	assert.NotNil(t, i)
+}
 func BenchmarkSlidingWindow(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	errs := make(chan error, 1)
-	out := make(pipes.Pipes[[]int], 3)
-	out.Initialize(128)
-
-	w := NewSliding[int](100*time.Millisecond, 50*time.Millisecond).Create(ctx, out.Senders(), errs)
-
+	out := make(chan []int, 50)
+	w := NewSliding[int, string](100*time.Millisecond, 50*time.Millisecond).Create(ctx, out)
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				w.Push(1)
-				w.Push(2)
-				w.Push(3)
+				w.Push(newTestElement(1))
+				w.Push(newTestElement(2))
+				w.Push(newTestElement(3))
 			}
 		}
 	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		w.Push(4)
-		w.Push(5)
-		w.Push(6)
+		w.Push(newTestElement(4))
+		w.Push(newTestElement(5))
+		w.Push(newTestElement(6))
 	}
 	b.StopTimer()
+	b.ReportAllocs()
 }

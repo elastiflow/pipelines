@@ -1,6 +1,66 @@
-package partition
+package datastreams
 
-import "testing"
+import (
+	"sync"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+type mockPartition[T any, K comparable] struct {
+	mu     sync.Mutex
+	items  []KeyableElement[T, K]
+	closed bool
+}
+
+func (m *mockPartition[T, K]) Create() Partition[T, K] {
+	return m
+}
+
+func (m *mockPartition[T, K]) Push(item TimedKeyableElement[T, K]) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.items = append(m.items, item)
+}
+
+func (m *mockPartition[T, K]) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = true
+}
+
+// mockPartition is a test double for Partition[T, R]
+func TestStore_SetAndGet(t *testing.T) {
+	s := NewShardedPartitionStore[int, string](&ShardedStoreOpts[string]{
+		ShardCount:   2,
+		ShardKeyFunc: JumpHash[string],
+	})
+	s.Initialize()
+
+	p1 := &mockPartition[int, string]{}
+	p2 := &mockPartition[int, string]{}
+
+	s.Set("foo", p1)
+	s.Set("bar", p2)
+
+	got1, ok1 := s.Get("foo")
+	got2, ok2 := s.Get("bar")
+
+	assert.True(t, ok1)
+	assert.True(t, ok2)
+	assert.Equal(t, p1, got1)
+	assert.Equal(t, p2, got2)
+}
+
+func TestStore_GetMissingKey(t *testing.T) {
+	s := NewShardedPartitionStore[int, string](&ShardedStoreOpts[string]{
+		ShardCount:   2,
+		ShardKeyFunc: ModulusHash[string],
+	})
+	s.Initialize()
+	_, ok := s.Get("nonexistent")
+	assert.False(t, ok)
+}
 
 func TestJumpHash(t *testing.T) {
 	type testUser struct {

@@ -1,7 +1,20 @@
 package pipes
 
+import "context"
+
 type Receivers[T any] []<-chan T
 type Senders[T any] []chan<- T
+
+func (s Senders[T]) Send(ctx context.Context, item T) {
+	for _, out := range s {
+		select {
+		case <-ctx.Done():
+			return
+		case out <- item:
+		}
+	}
+}
+
 type Pipes[T any] []chan T
 
 func (c Pipes[T]) Initialize(buffer int) {

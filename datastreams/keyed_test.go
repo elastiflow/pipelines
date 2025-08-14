@@ -3,23 +3,69 @@ package datastreams
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/elastiflow/pipelines/datastreams/windower"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
+
+// MockPartition is a mock implementation of the Partition interface.
+// It collects all items pushed to it and flushes them on Close().
+type MockPartition[T any, K comparable] struct {
+	mock.Mock // Embed mock for call assertion capabilities if needed
+	out       chan<- []T
+	items     []TimedKeyableElement[T, K]
+	mu        sync.Mutex
+}
+
+func (m *MockPartition[T, K]) Push(item TimedKeyableElement[T, K]) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.items = append(m.items, item)
+}
+
+func (m *MockPartition[T, K]) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.items) > 0 {
+		// Create the window from all collected items.
+		window := make([]T, len(m.items))
+		for i, it := range m.items {
+			window[i] = it.Value()
+		}
+		m.out <- window
+	}
+}
+
+// MockPartitioner is a mock factory that creates MockPartition instances.
+type MockPartitioner[T any, K comparable] struct {
+	// You can add fields here if you need to configure its behavior,
+	// but for this test, none are needed.
+}
+
+// Create returns a new MockPartition instance ready for testing.
+func (m *MockPartitioner[T, K]) Create(ctx context.Context, out chan<- []T) Partition[T, K] {
+	return &MockPartition[T, K]{
+		out: out,
+	}
+}
+
+// Close
+func (m *MockPartitioner[T, K]) Close() {
+}
+
+// NewMockPartitioner is the constructor you called in your test.
+// The 'size' parameter is ignored as this mock batches everything.
+func NewMockPartitioner[T any, K comparable](size int) *MockPartitioner[T, K] {
+	return &MockPartitioner[T, K]{}
+}
 
 type testStruct struct {
 	ID   int
 	Name string
-}
-
-func drain(outCh <-chan testStruct) {
-	for range outCh {
-	}
 }
 
 func TestKeyBy(t *testing.T) {
@@ -65,7 +111,6 @@ func TestKeyBy(t *testing.T) {
 						input <- elem
 					}
 				}
-
 			}(ctx, tt.elements)
 
 			// Key the DataStream by "even"/"odd".
@@ -80,7 +125,7 @@ func TestKeyBy(t *testing.T) {
 
 			out := make([]int, 0)
 			for res := range kds.OrDone().Out() {
-				out = append(out, res.ID)
+				out = append(out, res.Value().ID)
 			}
 			assert.Len(t, out, 5)
 		})
@@ -91,15 +136,15 @@ func TestWindow(t *testing.T) {
 	testCases := []struct {
 		name     string
 		keyBy    KeyFunc[testStruct, int]
-		keyResBy KeyFunc[testStruct, int]
 		elements []testStruct
 		process  func(t []testStruct) (testStruct, error)
 		expected []testStruct
+		errLen   int
 	}{
 		{
 			name: "should key given key by even/odd and process",
 			keyBy: func(t testStruct) int {
-				return t.ID % 2
+				return t.ID % 2 // Keys will be 0 for even, 1 for odd
 			},
 			process: func(t []testStruct) (testStruct, error) {
 				newStr := testStruct{}
@@ -117,9 +162,54 @@ func TestWindow(t *testing.T) {
 				{ID: 4, Name: "4"},
 			},
 			expected: []testStruct{
+				// Expected result for key 0 (even): 0+2+4=6, "024"
 				{ID: 6, Name: "024"},
+				// Expected result for key 1 (odd): 1+3=4, "13"
 				{ID: 4, Name: "13"},
 			},
+		},
+		{
+			name:     "An empty input stream should produce no output",
+			keyBy:    func(t testStruct) int { return t.ID },
+			process:  func(t []testStruct) (testStruct, error) { return testStruct{}, nil },
+			elements: []testStruct{},
+			expected: []testStruct{},
+		},
+		{
+			name: "All elements mapping to a single key should produce one window",
+			keyBy: func(t testStruct) int {
+				return 1 // All items map to the same key
+			},
+			process: func(t []testStruct) (testStruct, error) {
+				newStr := testStruct{}
+				for _, elem := range t {
+					newStr.ID += elem.ID
+					newStr.Name += elem.Name
+				}
+				return newStr, nil
+			},
+			elements: []testStruct{
+				{ID: 10, Name: "A"},
+				{ID: 20, Name: "B"},
+				{ID: 30, Name: "C"},
+			},
+			expected: []testStruct{
+				{ID: 60, Name: "ABC"}, // 10+20+30, "A"+"B"+"C"
+			},
+		},
+		{
+			name:  "An error in the processing function should send to err channel and produce no output",
+			keyBy: func(t testStruct) int { return 1 },
+			process: func(t []testStruct) (testStruct, error) {
+				// This function always returns an error
+				return testStruct{}, fmt.Errorf("processing failed")
+			},
+			elements: []testStruct{
+				{ID: 1, Name: "A"},
+				{ID: 2, Name: "B"},
+			},
+			expected: []testStruct{}, // No results should be sent to the output
+			errLen:   1,
 		},
 	}
 
@@ -130,367 +220,42 @@ func TestWindow(t *testing.T) {
 
 			errCh := make(chan error, 10)
 			input := make(chan testStruct, 10)
-			go func(appCtx context.Context, inputElements []testStruct) {
-				for _, elem := range inputElements {
-					input <- elem
-				}
-
-			}(ctx, tt.elements)
-
-			// Key the DataStream by "even"/"odd".
 			kds := KeyBy[testStruct, int](
-				New[testStruct](ctx, input, errCh).WithWaitGroup(&sync.WaitGroup{}),
+				New[testStruct](ctx, input, errCh), // Simplified this line for clarity
 				tt.keyBy,
 				Params{
 					BufferSize: 50,
-					Num:        1, // only 1 output channel per key
+					Num:        1,
 				},
 			)
 
-			partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
+			// Use the new mock partitioner here
 			out := Window[testStruct, int, testStruct](
 				kds,
 				tt.process,
-				partitioner, // process over 500ms
+				NewMockPartitioner[testStruct, int](3), // This now works
 				Params{
 					BufferSize: 50,
 				},
 			)
+
+			go func(inputElements []testStruct) {
+				defer close(input)
+				for _, elem := range inputElements {
+					input <- elem
+				}
+			}(tt.elements)
 
 			endRes := make([]testStruct, 0)
 			for res := range out.OrDone().Out() {
 				endRes = append(endRes, res)
 			}
+			close(errCh) // Close the error channel to simulate no more errors
 
+			// The ElementsMatch assertion is perfect here since the order of
+			// window emission (even vs. odd) is not guaranteed.
 			assert.ElementsMatch(t, tt.expected, endRes)
+			assert.Equal(t, len(errCh), tt.errLen, "unexpected number of errors")
 		})
 	}
-}
-
-func BenchmarkWindowThroughput(b *testing.B) {
-	for _, count := range []int{1, 10, 100, 1000} {
-		b.Run(fmt.Sprintf("Count=%d", count), func(b *testing.B) {
-			// 1) setup
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			in := make(chan testStruct, b.N)
-			errCh := make(chan error, 1)
-
-			// key by ID%2 just as an example
-			kds := KeyBy[testStruct, int](
-				New[testStruct](ctx, in, errCh),
-				func(t testStruct) int { return t.ID % 2 },
-				Params{BufferSize: 50, Num: 1},
-			)
-			windowFunc := func(batch []testStruct) (testStruct, error) {
-				avgId := 0
-				for _, item := range batch {
-					avgId += item.ID
-				}
-				return testStruct{
-					ID:   avgId,
-					Name: "test",
-				}, nil
-			}
-
-			partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
-
-			win := Window[testStruct, int, testStruct](
-				kds,
-				windowFunc,
-				partitioner,
-				Params{BufferSize: 50},
-			)
-
-			go drain(win.OrDone().Out())
-
-			// 2) measure
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				in <- testStruct{ID: i, Name: "test"}
-			}
-			b.StopTimer()
-
-			// 3) teardown
-			close(in)
-		})
-	}
-}
-
-func BenchmarkWindowDuration(b *testing.B) {
-	durations := []time.Duration{
-		100 * time.Millisecond,
-		200 * time.Millisecond,
-		500 * time.Millisecond,
-	}
-
-	for _, dur := range durations {
-		b.Run(fmt.Sprintf("Dur=%s", dur), func(b *testing.B) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			in := make(chan testStruct, b.N)
-			errCh := make(chan error, 1)
-
-			kds := KeyBy[testStruct, int](
-				New[testStruct](ctx, in, errCh),
-				func(t testStruct) int { return t.ID % 2 },
-				Params{BufferSize: 50, Num: 1},
-			)
-
-			widowFunc := func(batch []testStruct) (testStruct, error) {
-				return testStruct{}, nil
-			}
-
-			win := Window[testStruct, int, testStruct](
-				kds,
-				widowFunc,
-				windower.NewInterval[testStruct](dur),
-				Params{BufferSize: 50},
-			)
-
-			go drain(win.OrDone().Out())
-
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				in <- testStruct{ID: i, Name: "test"}
-			}
-			b.StopTimer()
-
-			close(in)
-		})
-	}
-}
-
-func BenchmarkWindowBufferSize(b *testing.B) {
-	for _, buf := range []int{1, 10, 100, 1000} {
-		b.Run(fmt.Sprintf("Buf=%d", buf), func(b *testing.B) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			in := make(chan testStruct, buf)
-			errCh := make(chan error, 1)
-
-			kds := KeyBy[testStruct, int](
-				New[testStruct](ctx, in, errCh),
-				func(t testStruct) int { return t.ID % 2 },
-				Params{BufferSize: buf, Num: 1},
-			)
-
-			widowFunc := func(batch []testStruct) (testStruct, error) {
-				return testStruct{}, nil
-			}
-			partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
-
-			win := Window[testStruct, int, testStruct](
-				kds,
-				widowFunc,
-				partitioner,
-				Params{BufferSize: buf},
-			)
-
-			go drain(win.OrDone().Out())
-
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				in <- testStruct{ID: i, Name: "test"}
-			}
-			b.StopTimer()
-
-			close(in)
-		})
-	}
-}
-
-func BenchmarkWindowKeyCardinality(b *testing.B) {
-	for _, K := range []int{1, 2, 10, 100, 1000} {
-		b.Run(fmt.Sprintf("Keys=%d", K), func(b *testing.B) {
-			// Setup
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			in := make(chan testStruct, b.N)
-			errCh := make(chan error, 1)
-
-			kds := KeyBy[testStruct, int](
-				New[testStruct](ctx, in, errCh),
-				func(t testStruct) int { return t.ID % K },
-				Params{BufferSize: 50, Num: 1},
-			)
-			partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
-
-			winFunc := func(batch []testStruct) (testStruct, error) { return testStruct{}, nil }
-			win := Window[testStruct, int, testStruct](
-				kds,
-				winFunc,
-				partitioner,
-				Params{BufferSize: 50},
-			)
-			go drain(win.OrDone().Out())
-
-			// Measure
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				in <- testStruct{ID: i, Name: "test"}
-			}
-			b.StopTimer()
-
-			close(in)
-		})
-	}
-}
-
-func BenchmarkWindowAggregatorComplexity(b *testing.B) {
-	aggregators := map[string]func([]testStruct) (testStruct, error){
-		"NoOp": func(batch []testStruct) (testStruct, error) {
-			return testStruct{}, nil
-		},
-		"SumBatch": func(batch []testStruct) (testStruct, error) {
-			sum := 0
-			for _, t := range batch {
-				sum += t.ID
-			}
-			return testStruct{ID: sum}, nil
-		},
-		"SortBatch": func(batch []testStruct) (testStruct, error) {
-			ids := make([]int, len(batch))
-			for i, t := range batch {
-				ids[i] = t.ID
-			}
-			sort.Ints(ids)
-			return testStruct{ID: ids[len(ids)/2]}, nil
-		},
-	}
-
-	for name, agg := range aggregators {
-		b.Run(name, func(b *testing.B) {
-			// Setup
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			in := make(chan testStruct, b.N)
-			errCh := make(chan error, 1)
-
-			kds := KeyBy[testStruct, int](
-				New[testStruct](ctx, in, errCh),
-				func(t testStruct) int { return t.ID % 2 },
-				Params{BufferSize: 50, Num: 1},
-			)
-
-			partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
-			win := Window[testStruct, int, testStruct](
-				kds,
-				agg,
-				partitioner,
-				Params{BufferSize: 50},
-			)
-			go drain(win.OrDone().Out())
-
-			// Measure
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				in <- testStruct{ID: i, Name: "test"}
-			}
-			b.StopTimer()
-
-			close(in)
-		})
-	}
-}
-
-func BenchmarkWindowConcurrency(b *testing.B) {
-	producers := []int{1, 4, 8}
-	partitions := []int{1, 4, 8}
-
-	for _, N := range producers {
-		for _, M := range partitions {
-			name := fmt.Sprintf("Producers=%d_Parts=%d", N, M)
-			b.Run(name, func(b *testing.B) {
-				// Setup
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				in := make(chan testStruct, b.N)
-				errCh := make(chan error, 1)
-
-				kds := KeyBy[testStruct, int](
-					New[testStruct](ctx, in, errCh),
-					func(t testStruct) int { return t.ID % M },
-					Params{BufferSize: 50, Num: M},
-				)
-				proc := func(batch []testStruct) (testStruct, error) { return testStruct{}, nil }
-				partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
-				win := Window[testStruct, int, testStruct](
-					kds,
-					proc,
-					partitioner,
-					Params{BufferSize: 50},
-				)
-				go drain(win.OrDone().Out())
-
-				// Measure: N concurrent producers splitting the b.N pushes
-				b.ResetTimer()
-				var wg sync.WaitGroup
-				wg.Add(N)
-				for p := 0; p < N; p++ {
-					go func(p int) {
-						defer wg.Done()
-						for i := p; i < b.N; i += N {
-							in <- testStruct{ID: i, Name: "test"}
-						}
-					}(p)
-				}
-				wg.Wait()
-				b.StopTimer()
-
-				close(in)
-			})
-		}
-	}
-}
-
-func BenchmarkWindowErrorPath(b *testing.B) {
-	const errEvery = 100
-
-	agg := func(batch []testStruct) (testStruct, error) {
-		if len(batch) > 0 && batch[0].ID%errEvery == 0 {
-			return testStruct{}, fmt.Errorf("error at %d", batch[0].ID)
-		}
-		return testStruct{ID: batch[0].ID}, nil
-	}
-
-	partitioner := windower.NewInterval[testStruct](50 * time.Millisecond)
-
-	// Setup
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	in := make(chan testStruct, b.N)
-	errCh := make(chan error, b.N)
-
-	kds := KeyBy[testStruct, int](
-		New[testStruct](ctx, in, errCh),
-		func(t testStruct) int { return t.ID % 2 },
-		Params{BufferSize: 50, Num: 1},
-	)
-
-	win := Window[testStruct, int, testStruct](
-		kds,
-		agg,
-		partitioner,
-		Params{BufferSize: 50},
-	)
-	go drain(win.OrDone().Out())
-
-	// Drain the error channel so aggregator errors don't block
-	go func() {
-		for range errCh {
-		}
-	}()
-
-	// Measure
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		in <- testStruct{ID: i, Name: "test"}
-	}
-	b.StopTimer()
-
-	close(in)
 }
