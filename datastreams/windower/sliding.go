@@ -128,6 +128,7 @@ type Sliding[T any, K comparable] struct {
 	SlideInterval  time.Duration // This defines the cadence
 	wg             *sync.WaitGroup
 	done           chan struct{} // Used to signal shutdown
+	closeDone      *sync.Once    // Ensures we only close done once
 }
 
 // NewSliding constructs a Sliding partitioner.
@@ -151,6 +152,7 @@ func NewSliding[T any, K comparable](
 		SlideInterval:  slideInterval,
 		wg:             &sync.WaitGroup{},
 		done:           make(chan struct{}),
+		closeDone:      &sync.Once{},
 	}
 }
 
@@ -175,7 +177,9 @@ func (s *Sliding[T, K]) Create(ctx context.Context, out chan<- []T) datastreams.
 }
 
 func (s *Sliding[T, K]) Close() {
-	close(s.done)
+	s.closeDone.Do(func() {
+		close(s.done)
+	})
 	s.wg.Wait()
 }
 

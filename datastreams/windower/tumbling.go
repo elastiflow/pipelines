@@ -31,6 +31,7 @@ type Tumbling[T any, K comparable] struct {
 	WindowDuration time.Duration
 	wg             *sync.WaitGroup // WaitGroup to manage goroutines
 	done           chan struct{}   // Channel to signal shutdown
+	closeDone      *sync.Once      // Ensures we only close done once
 }
 
 // NewTumbling constructs a Tumbling window partitioner.
@@ -44,6 +45,7 @@ func NewTumbling[T any, K comparable](
 		WindowDuration: windowDuration,
 		wg:             &sync.WaitGroup{},
 		done:           make(chan struct{}),
+		closeDone:      &sync.Once{},
 	}
 }
 
@@ -68,7 +70,9 @@ func (t *Tumbling[T, K]) Create(ctx context.Context, out chan<- []T) datastreams
 // Close signals the Tumbling partitioner to stop accepting new items and flush any remaining data.
 // It waits for all active partitions to finish processing before returning.
 func (t *Tumbling[T, K]) Close() {
-	close(t.done)
+	t.closeDone.Do(func() {
+		close(t.done)
+	})
 	t.wg.Wait()
 }
 

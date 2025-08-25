@@ -66,15 +66,15 @@ func KeyBy[T any, K comparable](
 func Window[T any, K comparable, R any](
 	keyedDs KeyedDataStream[T, K],
 	wf WindowFunc[T, R],
-	partitioner Partitioner[T, K], // The new partitioner interface
+	partitioner Partitioner[T, K],
 	param ...Params,
 ) DataStream[R] {
 	params := applyParams(param...)
-
 	shardedStore := NewShardedPartitionStore[T, K](&ShardedStoreOpts[K]{
 		ShardKeyFunc: ModulusHash[K],
 		ShardCount:   params.ShardCount,
 	})
+	shardedStore.Initialize()
 
 	var dispatchWg sync.WaitGroup
 

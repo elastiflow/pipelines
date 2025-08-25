@@ -108,7 +108,6 @@ func BenchmarkKeyedDataStream(b *testing.B) {
 					datastreams.Params{},
 				)
 				return kds.Run(func(v datastreams.KeyableElement[int, int]) (datastreams.KeyableElement[int, int], error) {
-					time.Sleep(2 * time.Millisecond)
 					return datastreams.NewKeyedElement[int, int](v.Key(), v.Value()*2), nil
 				})
 			},
@@ -138,7 +137,6 @@ func BenchmarkKeyedDataStream(b *testing.B) {
 				return kds.FanOut(
 					datastreams.Params{Num: 5},
 				).Run(func(v datastreams.KeyableElement[int, int]) (datastreams.KeyableElement[int, int], error) {
-					time.Sleep(2 * time.Millisecond)
 					return datastreams.NewKeyedElement[int, int](v.Key(), v.Value()*2), nil
 				})
 			},
