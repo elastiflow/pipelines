@@ -2,155 +2,122 @@ package windower
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
-	"github.com/elastiflow/pipelines/datastreams/internal/partition"
+	"github.com/elastiflow/pipelines/datastreams"
+	"github.com/stretchr/testify/require"
 
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewTumblingFactory(t *testing.T) {
-	testcases := []struct {
-		name           string
-		windowDuration time.Duration
-		slideInterval  time.Duration
-		assertErr      func(t *testing.T, err error)
-		assert         func(t *testing.T, p partition.Factory[int])
-	}{
-		{
-			name:           "invalid window duration and slide interval",
-			windowDuration: 0 * time.Millisecond,
-			slideInterval:  0 * time.Millisecond,
-			assertErr: func(t *testing.T, err error) {
-				assert.Error(t, err)
-				assert.Equal(t, "window duration and slide interval must be greater than 0", err.Error())
-			},
-			assert: func(t *testing.T, p partition.Factory[int]) {
-				assert.Nil(t, p)
-			},
-		},
-	}
-
-	for _, tc := range testcases {
-		t.Run(tc.name, func(t *testing.T) {
-			s, err := NewSlidingFactory[int](tc.windowDuration, tc.slideInterval)
-			tc.assertErr(t, err)
-			tc.assert(t, s)
-		})
-	}
+func newTestElement(key int) datastreams.TimedKeyableElement[int, string] {
+	ke := datastreams.NewKeyedElement[int, string](fmt.Sprintf("key-%d", key), key)
+	return datastreams.NewTimedKeyedElement(ke, time.Now())
 }
 
 func TestNewTumbling(t *testing.T) {
+	t.Parallel()
+	w := NewTumbling[int, string](200 * time.Millisecond)
+	assert.NotNil(t, w)
+}
+
+func TestTumbling(t *testing.T) {
 	testcases := []struct {
-		name           string
-		windowDuration time.Duration
-		pushInterval   time.Duration
-		pushCount      int
-		expected       [][]int
-		assertPanics   bool
+		name             string
+		interval         time.Duration
+		pushInterval     time.Duration
+		pushCount        int
+		windowCount      int
+		gapDur           time.Duration
+		postGapPushCount int
 	}{
 		{
-			name:           "Valid window duration",
-			windowDuration: 200 * time.Millisecond,
-			pushInterval:   500 * time.Millisecond,
-			pushCount:      0,
-			expected:       [][]int{},
+			name:         "exactly two windows with no gaps",
+			interval:     500 * time.Millisecond,
+			pushInterval: 100 * time.Millisecond,
+			pushCount:    8,
+			windowCount:  2,
+		},
+		{
+			name:         "exactly 2 windows two batches with two gaps",
+			interval:     200 * time.Millisecond,
+			pushInterval: 100 * time.Millisecond,
+			pushCount:    4,
+			gapDur:       400 * time.Millisecond,
+			windowCount:  2,
+		},
+		{
+			name:             "exactly 3 windows two batches with two gaps and one post gap push",
+			interval:         200 * time.Millisecond,
+			pushInterval:     100 * time.Millisecond,
+			pushCount:        4,
+			gapDur:           400 * time.Millisecond,
+			windowCount:      3,
+			postGapPushCount: 1,
 		},
 	}
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			defer cancel()
-
 			errs := make(chan error, 10)
-			out := make(pipes.Pipes[[]int], 1)
-			out.Initialize(10)
-			defer out.Close()
+			partitioner := NewTumbling[int, string](tc.interval)
+			out := make(chan []int, 10)
+			go func() {
+				defer close(out)
+				p := partitioner.Create(context.Background(), out)
+				for i := 1; i <= tc.pushCount; i++ {
+					p.Push(newTestElement(i))
+					time.Sleep(tc.pushInterval)
+				}
+				time.Sleep(tc.gapDur)
+				if tc.postGapPushCount > 0 {
+					for i := 1; i <= tc.postGapPushCount; i++ {
+						p.Push(newTestElement(tc.pushCount + i))
+						time.Sleep(tc.pushInterval)
+					}
+				}
+				partitioner.Close()
 
-			w := newTumbling[int](ctx, out.Senders(), errs, tc.windowDuration)
-			assert.NotNil(t, w)
+			}()
 
-		})
-	}
-}
-
-func TestTumblingWindow_Flush(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	errs := make(chan error, 10)
-	out := make(pipes.Pipes[[]int], 1)
-	out.Initialize(10)
-	defer out.Close()
-
-	// interval = 200ms
-	w := newTumbling[int](ctx, out.Senders(), errs, 200*time.Millisecond)
-
-	// push 8 items, one every 50ms → exactly two windows of 4 items each
-	go func() {
-		for i := 1; i <= 4; i++ {
-			w.Push(i)
-			time.Sleep(50 * time.Millisecond)
-		}
-
-		// ensure we are out the way of the first window
-		time.Sleep(100 * time.Millisecond)
-
-		for i := 5; i <= 8; i++ {
-			w.Push(i)
-			time.Sleep(50 * time.Millisecond)
-		}
-
-		time.Sleep(100 * time.Millisecond)
-		// No more items will be pushed
-	}()
-
-	var results [][]int
-	expected := [][]int{{1, 2, 3, 4}, {5, 6, 7, 8}}
-	for {
-		select {
-		case v := <-out[0]:
-			results = append(results, v)
-		case <-ctx.Done():
-			for i, res := range results {
-				assert.ElementsMatch(t, expected[i], res)
-				assert.Empty(t, errs)
+			var results [][]int
+			for elem := range out {
+				results = append(results, elem)
 			}
-			return
-		}
+
+			require.Len(t, results, tc.windowCount, "number of windows mismatch")
+			assert.Empty(t, errs)
+		})
 	}
 }
 
 func BenchmarkTumbling(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	errs := make(chan error, 10)
-	out := make(pipes.Pipes[[]int], 1)
-	out.Initialize(10)
-
-	w := newTumbling[int](ctx, out.Senders(), errs, 200*time.Millisecond)
+	out := make(chan []int, 10)
+	w := NewTumbling[int, string](200 * time.Millisecond)
+	p := w.Create(ctx, out)
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				w.Push(1)
-				w.Push(2)
-				w.Push(3)
+				p.Push(newTestElement(1))
+				p.Push(newTestElement(2))
+				p.Push(newTestElement(3))
 			}
 		}
 	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		w.Push(4)
-		w.Push(5)
-		w.Push(6)
+		p.Push(newTestElement(4))
+		p.Push(newTestElement(5))
+		p.Push(newTestElement(6))
 	}
 	b.StopTimer()
 }

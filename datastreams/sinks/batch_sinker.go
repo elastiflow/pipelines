@@ -37,7 +37,7 @@ func (s *BatchSinker[T]) Sink(ctx context.Context, ds datastreams.DataStream[T])
 	for {
 		select {
 		case <-ctx.Done():
-			// Flush any remaining items in the batch upon shutdown.
+			// TryFlush any remaining items in the batch upon shutdown.
 			s.flush(ctx, s.Next())
 			return nil
 		case val := <-ds.Out():

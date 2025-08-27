@@ -63,6 +63,7 @@ func TestEventSourcer_MarkSuccess(t *testing.T) {
 	t.Parallel()
 	messageConsumer := &MockConsumer[int]{}
 	messageConsumer.On("MarkSuccess", 56).Return()
+
 	sourcer := NewEventSourcer[int](
 		5,
 		messageConsumer,

@@ -57,11 +57,7 @@ func Example_window() {
 		{DeviceID: "device-2", Temp: 19.7, Humidity: 54.5, Timestamp: time.Now()},
 	}
 
-	partitionFactory, err := windower.NewTumblingFactory[*SensorReading](100 * time.Millisecond)
-	if err != nil {
-		slog.Error("failed to create partition factory: " + err.Error())
-		return
-	}
+	partitionFactory := windower.NewTumbling[*SensorReading, string](100 * time.Millisecond)
 
 	// Create a source with 10 integers
 	pl := pipelines.New[*SensorReading, *SensorInference](

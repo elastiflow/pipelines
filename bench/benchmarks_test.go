@@ -97,33 +97,38 @@ func BenchmarkKeyedDataStream(b *testing.B) {
 	keyFunc := func(v int) int { return v % 10 }
 	benchmarks := []struct {
 		name    string
-		process func(v datastreams.DataStream[int]) datastreams.DataStream[int]
+		process func(p datastreams.DataStream[int]) datastreams.DataStream[datastreams.KeyableElement[int, int]]
 	}{
 		{
 			name: "fast keyed pipeline",
-			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[datastreams.KeyableElement[int, int]] {
 				kds := datastreams.KeyBy(
 					p,
 					keyFunc,
 					datastreams.Params{},
 				)
-				return kds.Run(func(v int) (int, error) { return v * 2, nil })
+				return kds.Run(func(v datastreams.KeyableElement[int, int]) (datastreams.KeyableElement[int, int], error) {
+					return datastreams.NewKeyedElement[int, int](v.Key(), v.Value()*2), nil
+				})
 			},
 		},
 		{
 			name: "fast keyed pipeline watermark/time",
-			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[datastreams.KeyableElement[int, int]] {
 				kds := datastreams.KeyBy(
 					p,
 					keyFunc,
 					datastreams.Params{},
 				).WithWatermarkGenerator(nil).WithTimeMarker(nil)
-				return kds.Run(func(v int) (int, error) { return v * 2, nil })
+				return kds.Run(func(v datastreams.KeyableElement[int, int]) (datastreams.KeyableElement[int, int], error) {
+					time.Sleep(2 * time.Millisecond)
+					return datastreams.NewKeyedElement[int, int](v.Key(), v.Value()*2), nil
+				})
 			},
 		},
 		{
 			name: "fast keyed pipeline fanOut-5",
-			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[datastreams.KeyableElement[int, int]] {
 				kds := datastreams.KeyBy(
 					p,
 					keyFunc,
@@ -131,26 +136,28 @@ func BenchmarkKeyedDataStream(b *testing.B) {
 				)
 				return kds.FanOut(
 					datastreams.Params{Num: 5},
-				).Run(func(v int) (int, error) { return v * 2, nil })
+				).Run(func(v datastreams.KeyableElement[int, int]) (datastreams.KeyableElement[int, int], error) {
+					return datastreams.NewKeyedElement[int, int](v.Key(), v.Value()*2), nil
+				})
 			},
 		},
 		{
 			name: "slow keyed pipeline",
-			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[datastreams.KeyableElement[int, int]] {
 				kds := datastreams.KeyBy(
 					p,
 					keyFunc,
 					datastreams.Params{},
 				)
-				return kds.Run(func(v int) (int, error) {
+				return kds.Run(func(v datastreams.KeyableElement[int, int]) (datastreams.KeyableElement[int, int], error) {
 					time.Sleep(2 * time.Millisecond)
-					return v * 2, nil
+					return datastreams.NewKeyedElement[int, int](v.Key(), v.Value()*2), nil
 				})
 			},
 		},
 		{
 			name: "slow keyed pipeline fanOut-5",
-			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[datastreams.KeyableElement[int, int]] {
 				kds := datastreams.KeyBy(
 					p,
 					keyFunc,
@@ -158,15 +165,15 @@ func BenchmarkKeyedDataStream(b *testing.B) {
 				)
 				return kds.FanOut(
 					datastreams.Params{Num: 5},
-				).Run(func(v int) (int, error) {
+				).Run(func(v datastreams.KeyableElement[int, int]) (datastreams.KeyableElement[int, int], error) {
 					time.Sleep(2 * time.Millisecond)
-					return v * 2, nil
+					return datastreams.NewKeyedElement[int, int](v.Key(), v.Value()*2), nil
 				})
 			},
 		},
 		{
 			name: "slow keyed pipeline fanOut-5 buffered-5",
-			process: func(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+			process: func(p datastreams.DataStream[int]) datastreams.DataStream[datastreams.KeyableElement[int, int]] {
 				kds := datastreams.KeyBy(
 					p,
 					keyFunc,
@@ -174,9 +181,9 @@ func BenchmarkKeyedDataStream(b *testing.B) {
 				)
 				return kds.FanOut(
 					datastreams.Params{Num: 5},
-				).Run(func(v int) (int, error) {
+				).Run(func(v datastreams.KeyableElement[int, int]) (datastreams.KeyableElement[int, int], error) {
 					time.Sleep(2 * time.Millisecond)
-					return v * 2, nil
+					return datastreams.NewKeyedElement[int, int](v.Key(), v.Value()*2), nil
 				}).FanIn(
 					datastreams.Params{BufferSize: 5},
 				)
@@ -188,7 +195,7 @@ func BenchmarkKeyedDataStream(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			errChan := make(chan error, 1)
 			defer close(errChan)
-			pipeline := pipelines.New[int, int](
+			pipeline := pipelines.New[int, datastreams.KeyableElement[int, int]](
 				context.Background(),
 				NewBenchmarkConsumer(b.N),
 				errChan,

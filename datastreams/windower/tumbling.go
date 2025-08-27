@@ -2,99 +2,154 @@ package windower
 
 import (
 	"context"
-	"errors"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/elastiflow/pipelines/datastreams/internal/partition"
-	"github.com/elastiflow/pipelines/datastreams/internal/pipes"
+	"github.com/elastiflow/pipelines/datastreams"
 )
 
+// Tumbling implements fixed-size, non-overlapping, sequential windows that are
+// triggered by the arrival of data. A new window is
+// created only when the first element arrives after a previous window has completed.
+//
+// The lifecycle is as follows:
+//  1. The window is idle, awaiting data.
+//  2. The first element arrives, immediately starting a ticker for WindowDuration.
+//  3. All subsequent elements that arrive before the ticker fires are collected into the active window.
+//  4. When the ticker fires, the entire batch of collected elements is emitted (flushed).
+//  5. The window returns to an idle state, waiting for the Next element to begin the cycle again.
+//
+//
+// Visualization
+//
+// ---[Item 1 Arrives]---(items being collected)---[Timer Fires, Window 1 Emits]---(idle)---[Item N Arrives]---
+//   |-------------------- Window 1 -------------------|                                  |---- Window 2 ----
+//   <------------------ WindowDuration ---------------->
+
+type Tumbling[T any, K comparable] struct {
+	WindowDuration time.Duration
+	wg             *sync.WaitGroup // WaitGroup to manage goroutines
+	done           chan struct{}   // Channel to signal shutdown
+	closeDone      *sync.Once      // Ensures we only close done once
+}
+
+// NewTumbling constructs a Tumbling window partitioner.
+// Parameters:
+//   - windowDuration : The duration of each tumbling window.
+//     This is the time after which the collected items will be flushed.
+func NewTumbling[T any, K comparable](
+	windowDuration time.Duration,
+) *Tumbling[T, K] {
+	return &Tumbling[T, K]{
+		WindowDuration: windowDuration,
+		wg:             &sync.WaitGroup{},
+		done:           make(chan struct{}),
+		closeDone:      &sync.Once{},
+	}
+}
+
+// Create initializes a new partition that will collect items until the
+// WindowDuration has elapsed. It returns a new partition that can be used to
+// Push items into the buffer.
+func (t *Tumbling[T, K]) Create(ctx context.Context, out chan<- []T) datastreams.Partition[T, K] {
+	// Create the instance that will manage the state for one key.
+	p := &tumblingPartition[T, K]{
+		ctx:            ctx,
+		out:            out,
+		windowDuration: t.WindowDuration,
+		batch:          NewBatch[T](),
+		windowSwitch:   newStatus(),
+		timer:          time.NewTimer(t.WindowDuration),
+		done:           t.done,
+		wg:             t.wg,
+	}
+	return p
+}
+
+// Close signals the Tumbling partitioner to stop accepting new items and flush any remaining data.
+// It waits for all active partitions to finish processing before returning.
+func (t *Tumbling[T, K]) Close() {
+	t.closeDone.Do(func() {
+		close(t.done)
+	})
+	t.wg.Wait()
+}
+
+type tumblingPartition[T any, K comparable] struct {
+	ctx            context.Context
+	out            chan<- []T
+	windowDuration time.Duration
+	batch          *Batch[T]
+	windowSwitch   *status // Atomically tracks if a window is active
+	done           chan struct{}
+	wg             *sync.WaitGroup
+	timer          *time.Timer
+}
+
+// Push adds an item to the batch. If no window is active, it starts one.
+func (p *tumblingPartition[T, K]) Push(item datastreams.TimedKeyableElement[T, K]) {
+	p.batch.Push(item.Value())
+	if p.windowSwitch.tryStart() {
+		p.wg.Add(1)
+		go p.waitAndFlush()
+	}
+}
+
+func (p *tumblingPartition[T, K]) waitAndFlush() {
+	defer p.wg.Done()
+	defer p.windowSwitch.tryStop()
+
+	select {
+	case <-p.done:
+		p.timer = nil
+		p.flush()
+		p.windowSwitch.tryStop()
+		return
+	case <-p.timer.C:
+		if !p.windowSwitch.started.Load() {
+			return // No active window, nothing to flush
+		}
+		p.flush()
+		p.timer.Reset(p.windowDuration)
+		p.windowSwitch.tryStop()
+	}
+
+}
+
+func (p *tumblingPartition[T, K]) flush() {
+	if batch := p.batch.Next(); len(batch) > 0 {
+		p.out <- batch
+	}
+}
+
+// status is a helper for atomic boolean state.
 type status struct {
 	started atomic.Bool
 }
 
-func newStatus() *status {
-	return &status{
-		started: atomic.Bool{},
+func newStatus() *status         { return &status{} }
+func (s *status) tryStart() bool { return s.started.CompareAndSwap(false, true) }
+func (s *status) tryStop() bool  { return s.started.CompareAndSwap(true, false) }
+func (s *status) Stop() bool {
+	if !s.started.Load() {
+		return false // Already stopped
 	}
+	s.started.Store(false)
+	return true
 }
 
-func (s *status) tryStop() bool {
-	return s.started.CompareAndSwap(true, false)
+type Batch[T any] struct {
+	items []T
+	mu    sync.RWMutex
 }
 
-func (s *status) tryStart() bool {
-	return s.started.CompareAndSwap(false, true)
-}
-
-// tumbling buffers items for windowDuration once the first item arrives.
-// After windowDuration, it publishes the batch and clears it, then waits
-// for the next item to start a new timer.
-type tumbling[T any] struct {
-	*partition.Base[T]
-	ctx            context.Context
-	status         *status
-	windowDuration time.Duration
-}
-
-// newTumbling constructs a tumbling window partition. The first Push
-// after a flush will start a new window timer.
-func newTumbling[T any](
-	ctx context.Context,
-	out pipes.Senders[[]T],
-	errs chan<- error,
-	windowDuration time.Duration,
-) partition.Partition[T] {
-
-	t := &tumbling[T]{
-		Base:           partition.NewBase[T](out, errs),
-		windowDuration: windowDuration,
-		ctx:            ctx,
-		status:         newStatus(),
-	}
-	return t
-}
-
-// Push adds to the current batch; if no timer is running, start one.
-func (t *tumbling[T]) Push(item T) {
-	t.Base.Push(item)
-
-	if t.status.tryStart() {
-		go t.waitAndFlush()
-	}
-}
-
-// waitAndFlush sleeps windowDuration, then flushes whatever is in the batch.
-func (t *tumbling[T]) waitAndFlush() {
-	timer := time.NewTimer(t.windowDuration)
-	defer timer.Stop()
-
-	select {
-	case <-t.ctx.Done():
-		t.status.tryStop()
-		return
-	case <-timer.C:
-		t.Base.FlushNext(t.ctx)
-		t.status.tryStop()
-	}
-}
-
-// NewTumblingFactory constructs a factory function that can be used
-// to create new instances of tumbling. This is useful for
-// creating multiple instances with the same processing function and
-// window duration.
-func NewTumblingFactory[T any](
-	windowDuration time.Duration,
-) (partition.Factory[T], error) {
-	if windowDuration <= 0 {
-		return nil, errors.New("window duration must be greater than 0")
-	}
-	return func(
-		ctx context.Context,
-		out pipes.Senders[[]T],
-		errs chan<- error,
-	) partition.Partition[T] {
-		return newTumbling(ctx, out, errs, windowDuration)
-	}, nil
+func NewBatch[T any]() *Batch[T] { return &Batch[T]{items: make([]T, 0)} }
+func (s *Batch[T]) Push(item T)  { s.mu.Lock(); s.items = append(s.items, item); s.mu.Unlock() }
+func (s *Batch[T]) Next() []T {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b := s.items
+	s.items = make([]T, 0)
+	return b
 }
