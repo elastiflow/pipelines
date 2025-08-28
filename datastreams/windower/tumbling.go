@@ -3,153 +3,163 @@ package windower
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/elastiflow/pipelines/datastreams"
 )
 
-// Tumbling implements fixed-size, non-overlapping, sequential windows that are
-// triggered by the arrival of data. A new window is
-// created only when the first element arrives after a previous window has completed.
-//
-// The lifecycle is as follows:
-//  1. The window is idle, awaiting data.
-//  2. The first element arrives, immediately starting a ticker for WindowDuration.
-//  3. All subsequent elements that arrive before the ticker fires are collected into the active window.
-//  4. When the ticker fires, the entire batch of collected elements is emitted (flushed).
-//  5. The window returns to an idle state, waiting for the Next element to begin the cycle again.
-//
-//
-// Visualization
-//
-// ---[Item 1 Arrives]---(items being collected)---[Timer Fires, Window 1 Emits]---(idle)---[Item N Arrives]---
-//   |-------------------- Window 1 -------------------|                                  |---- Window 2 ----
-//   <------------------ WindowDuration ---------------->
-
+// Tumbling implements fixed-size, non-overlapping windows that start on
+// first element and flush the accumulated batch when the window elapses.
 type Tumbling[T any, K comparable] struct {
 	WindowDuration time.Duration
-	wg             *sync.WaitGroup // WaitGroup to manage goroutines
-	done           chan struct{}   // Channel to signal shutdown
-	closeDone      *sync.Once      // Ensures we only close done once
+
+	wg        sync.WaitGroup
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
-// NewTumbling constructs a Tumbling window partitioner.
-// Parameters:
-//   - windowDuration : The duration of each tumbling window.
-//     This is the time after which the collected items will be flushed.
-func NewTumbling[T any, K comparable](
-	windowDuration time.Duration,
-) *Tumbling[T, K] {
+// NewTumbling constructs a Tumbling window with the provided duration.
+func NewTumbling[T any, K comparable](windowDuration time.Duration) *Tumbling[T, K] {
 	return &Tumbling[T, K]{
 		WindowDuration: windowDuration,
-		wg:             &sync.WaitGroup{},
 		done:           make(chan struct{}),
-		closeDone:      &sync.Once{},
 	}
 }
 
-// Create initializes a new partition that will collect items until the
-// WindowDuration has elapsed. It returns a new partition that can be used to
-// Push items into the buffer.
+// Create initializes a new partition for key K that owns all mutable state
+// in a single goroutine to avoid data races. The partition receives a
+// cancelable child context that is also canceled when Tumbling.Close()
+// is called.
 func (t *Tumbling[T, K]) Create(ctx context.Context, out chan<- []T) datastreams.Partition[T, K] {
-	// Create the instance that will manage the state for one key.
+	// Derive a cancelable context per partition.
+	pctx, cancel := context.WithCancel(ctx)
+
+	// Bridge Tumbling.Close() -> partition context cancellation.
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-t.done:
+		}
+		cancel()
+	}()
+
 	p := &tumblingPartition[T, K]{
-		ctx:            ctx,
-		out:            out,
-		windowDuration: t.WindowDuration,
-		batch:          NewBatch[T](),
-		windowSwitch:   newStatus(),
-		timer:          time.NewTimer(t.WindowDuration),
-		done:           t.done,
-		wg:             t.wg,
+		ctx:    pctx,
+		cancel: cancel,
+		out:    out,
+		window: t.WindowDuration,
+		in:     make(chan datastreams.TimedKeyableElement[T, K], 128),
+		batch:  NewBatch[T](),
 	}
+
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		p.run()
+	}()
+
 	return p
 }
 
-// Close signals the Tumbling partitioner to stop accepting new items and flush any remaining data.
-// It waits for all active partitions to finish processing before returning.
+// Close cancels all partitions created from this Tumbling and waits
+// for their goroutines to exit.
 func (t *Tumbling[T, K]) Close() {
-	t.closeDone.Do(func() {
+	t.closeOnce.Do(func() {
 		close(t.done)
+		t.wg.Wait()
 	})
-	t.wg.Wait()
 }
+
+// -------------------- partition --------------------
 
 type tumblingPartition[T any, K comparable] struct {
-	ctx            context.Context
-	out            chan<- []T
-	windowDuration time.Duration
-	batch          *Batch[T]
-	windowSwitch   *status // Atomically tracks if a window is active
-	done           chan struct{}
-	wg             *sync.WaitGroup
-	timer          *time.Timer
+	ctx    context.Context
+	cancel context.CancelFunc
+	out    chan<- []T
+	window time.Duration
+
+	in    chan datastreams.TimedKeyableElement[T, K]
+	batch *Batch[T]
+
+	closeOnce sync.Once
 }
 
-// Push adds an item to the batch. If no window is active, it starts one.
-func (p *tumblingPartition[T, K]) Push(item datastreams.TimedKeyableElement[T, K]) {
-	p.batch.Push(item.Value())
-	if p.windowSwitch.tryStart() {
-		p.wg.Add(1)
-		go p.waitAndFlush()
-	}
-}
-
-func (p *tumblingPartition[T, K]) waitAndFlush() {
-	defer p.wg.Done()
-	defer p.windowSwitch.tryStop()
-
+// Push enqueues the element for the partition, or returns promptly if canceled.
+func (p *tumblingPartition[T, K]) Push(it datastreams.TimedKeyableElement[T, K]) {
 	select {
-	case <-p.done:
-		p.timer = nil
-		p.flush()
-		p.windowSwitch.tryStop()
+	case <-p.ctx.Done():
 		return
-	case <-p.timer.C:
-		if !p.windowSwitch.started.Load() {
-			return // No active window, nothing to flush
-		}
-		p.flush()
-		p.timer.Reset(p.windowDuration)
-		p.windowSwitch.tryStop()
+	case p.in <- it:
 	}
+}
 
+// Close cancels the partition's context, causing run() to exit.
+func (p *tumblingPartition[T, K]) Close() {
+	p.closeOnce.Do(func() { p.cancel() })
+}
+
+// run owns the timer and batch; it is the only goroutine that mutates them.
+func (p *tumblingPartition[T, K]) run() {
+	// Lazy-start timer on first element; until then, the timer case is disabled.
+	var timer *time.Timer
+	var timerC <-chan time.Time
+
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			// Final flush on cancellation.
+			p.flush()
+			return
+
+		case it := <-p.in:
+			p.batch.Push(it.Value())
+			// Start the timer when we see the first element of a window.
+			if timer == nil {
+				timer = time.NewTimer(p.window)
+				timerC = timer.C // enabling the timer case
+			}
+
+		case <-timerC:
+			p.flush()
+			// Restart the window timer.
+			if timer != nil {
+				timer.Reset(p.window)
+			}
+		}
+	}
 }
 
 func (p *tumblingPartition[T, K]) flush() {
-	if batch := p.batch.Next(); len(batch) > 0 {
-		p.out <- batch
+	if b := p.batch.Next(); len(b) > 0 {
+		select {
+		case <-p.ctx.Done():
+			return
+		case p.out <- b:
+		}
 	}
 }
 
-// status is a helper for atomic boolean state.
-type status struct {
-	started atomic.Bool
-}
+// -------------------- single-owner Batch --------------------
 
-func newStatus() *status         { return &status{} }
-func (s *status) tryStart() bool { return s.started.CompareAndSwap(false, true) }
-func (s *status) tryStop() bool  { return s.started.CompareAndSwap(true, false) }
-func (s *status) Stop() bool {
-	if !s.started.Load() {
-		return false // Already stopped
-	}
-	s.started.Store(false)
-	return true
-}
-
+// Batch is a single-owner container for collecting items in a window.
+// Since only run() touches it, no mutex is required.
 type Batch[T any] struct {
 	items []T
-	mu    sync.RWMutex
 }
 
-func NewBatch[T any]() *Batch[T] { return &Batch[T]{items: make([]T, 0)} }
-func (s *Batch[T]) Push(item T)  { s.mu.Lock(); s.items = append(s.items, item); s.mu.Unlock() }
-func (s *Batch[T]) Next() []T {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	b := s.items
-	s.items = make([]T, 0)
-	return b
+func NewBatch[T any]() *Batch[T] { return &Batch[T]{items: make([]T, 0, 256)} }
+
+func (b *Batch[T]) Push(item T) { b.items = append(b.items, item) }
+
+func (b *Batch[T]) Next() []T {
+	out := b.items
+	// Reuse capacity; avoid allocs in steady state.
+	b.items = b.items[:0]
+	return out
 }

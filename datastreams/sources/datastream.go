@@ -6,34 +6,22 @@ import (
 	"github.com/elastiflow/pipelines/datastreams"
 )
 
-// Pipe is a consumer that reads a payload from an HTTP endpoint and returns it as a channel
+// datastream wraps an existing datastreams.DataStream[T] so it can be used as a Sourcer.
+// NOTE: We keep the 'out' field for backward compatibility with existing tests/types,
+// but the zero-copy Source implementation below no longer uses it.
 type datastream[T any] struct {
 	out     chan T
 	inputDS datastreams.DataStream[T]
 }
 
-// FromDataStream creates a new Pipe Consumer
+// FromDataStream wraps an existing DataStream as a Sourcer without an extra hop.
+// This avoids an additional goroutine and channel send per element.
 func FromDataStream[T any](ds datastreams.DataStream[T]) datastreams.Sourcer[T] {
-	return &datastream[T]{
-		out:     make(chan T, 128),
-		inputDS: ds,
-	}
+	return &datastream[T]{inputDS: ds}
 }
 
-// Source reads the payload from the HTTP endpoint and sends it to the output channel
+// Source returns a DataStream that directly reuses the upstream channel.
+// No re-buffering or forwarding goroutine is created.
 func (p *datastream[T]) Source(ctx context.Context, errSender chan<- error) datastreams.DataStream[T] {
-	ds := datastreams.New[T](ctx, p.out, errSender)
-	go func(outSender chan<- T) {
-		defer close(outSender)
-		for in := range p.inputDS.Out() {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				outSender <- in
-			}
-
-		}
-	}(p.out)
-	return ds
+	return datastreams.New[T](ctx, p.inputDS.Out(), errSender)
 }

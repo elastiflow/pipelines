@@ -93,12 +93,9 @@ func Window[T any, K comparable, R any](
 					if !ok {
 						return
 					}
-					p, exists := shardedStore.Get(item.Key())
-					if !exists {
-						p = partitioner.Create(keyedDs.ctx, windowsChan)
-						shardedStore.Set(item.Key(), p)
-					}
-
+					p := shardedStore.GetOrCreate(item.Key(), func() Partition[T, K] {
+						return partitioner.Create(keyedDs.ctx, windowsChan)
+					})
 					p.Push(NewTimedKeyedElement(item, time.Now()))
 				case <-keyedDs.ctx.Done():
 					return

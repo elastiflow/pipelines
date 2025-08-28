@@ -1,0 +1,75 @@
+name: Go CI (race-hardened)
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+# Prevent redundant duplicated runs on the same branch/PR
+concurrency:
+  group: pipelines-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit-race:
+    name: Unit tests (race, shuffled)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: [ "1.22.x", "1.23.x" ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          check-latest: true
+          cache: true
+
+      - name: Show toolchain
+        run: |
+          go version
+          go env
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (race, count=1, shuffle=on)
+        env:
+          # Encourage more scheduler interleavings while keeping runs stable.
+          GOMAXPROCS: "2"
+        run: |
+          go test ./... -race -count=1 -shuffle=on -timeout=10m
+
+  window-stress:
+    name: Window stress (race x3)
+    needs: unit-race
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go (stable)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          check-latest: true
+          cache: true
+
+      - name: Stress tumbling & sliding with race detector
+        env:
+          GOMAXPROCS: "2"
+        run: |
+          go test -race -count=3 -timeout=10m             -run '^Test(Sliding|Tumbling)_NoDataRace_Stress(_Long)?$' ./datastreams/windower

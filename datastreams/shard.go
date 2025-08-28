@@ -6,30 +6,24 @@ import (
 	"sync"
 )
 
-// ShardedStore is a thread-safe, in-memory generic key-value store.
-// It distributes data across a fixed number of internal shards to reduce
-// lock contention and improve concurrency in high-throughput environments.
-// The sharding strategy is determined by the provided ShardKeyFunc.
+// ShardedStore is a thread-safe, in-memory generic key-value store for per-key Partitions.
+// It distributes data across a fixed number of internal shards to reduce lock contention.
 type ShardedStore[T any, K comparable] struct {
-	store store[K] // The unexported slice of actual shard stores.
+	store store[K]
 	*ShardedStoreOpts[K]
 }
 
-// ShardedStoreOpts provides the configuration for creating a new ShardedStore.
+// ShardedStoreOpts configures a ShardedStore.
 type ShardedStoreOpts[K comparable] struct {
-	// ShardCount is the total number of concurrent shards to create.
-	// Must be greater than zero.
+	// ShardCount is the number of shards. If zero, it defaults to 1.
 	ShardCount int
-	// ShardKeyFunc is the hashing function used to map a key to a shard index.
+	// ShardKeyFunc maps a key to a shard index.
 	ShardKeyFunc ShardKeyFunc[K]
 }
 
-// NewShardedPartitionStore creates and initializes a new ShardedStore with the provided options.
-// If the ShardCount in the options is zero, it defaults to 1 to ensure a functional store.
-func NewShardedPartitionStore[T any, K comparable](
-	opts *ShardedStoreOpts[K],
-) *ShardedStore[T, K] {
-	if opts.ShardCount == 0 {
+// NewShardedPartitionStore constructs a new ShardedStore.
+func NewShardedPartitionStore[T any, K comparable](opts *ShardedStoreOpts[K]) *ShardedStore[T, K] {
+	if opts.ShardCount <= 0 {
 		opts.ShardCount = 1
 	}
 	return &ShardedStore[T, K]{
@@ -38,41 +32,176 @@ func NewShardedPartitionStore[T any, K comparable](
 	}
 }
 
-// Get retrieves a Partition[T] by its key K from the store.
-// It returns the Partition and a boolean indicating whether the key was found.
-// If the key does not exist, it returns a zero value of Partition[T] and false
+// Initialize allocates shard maps.
+func (s *ShardedStore[T, K]) Initialize() { s.store.Initialize() }
+
+// partitionHolder is a lazy-initialization wrapper used by GetOrCreate.
+// We publish a holder atomically via sync.Map.LoadOrStore and initialize
+// the actual Partition exactly once using sync.Once.
+type partitionHolder[T any, K comparable] struct {
+	once sync.Once
+	p    Partition[T, K]
+}
+
+// Get returns the Partition for key k, if present.
+// It unwraps a stored *partitionHolder if already initialized.
 func (s *ShardedStore[T, K]) Get(k K) (Partition[T, K], bool) {
 	var zero Partition[T, K]
-	index, found := s.store.Get(k, s.ShardKeyFunc)
-	if !found {
+	v, ok := s.store.Get(k, s.ShardKeyFunc)
+	if !ok {
 		return zero, false
 	}
-
-	if value, ok := index.(Partition[T, K]); ok {
-		return value, ok
+	switch vv := v.(type) {
+	case Partition[T, K]:
+		return vv, true
+	case *partitionHolder[T, K]:
+		if vv.p != nil {
+			return vv.p, true
+		}
+		return zero, false
+	default:
+		return zero, false
 	}
-	return zero, false
 }
 
-// Set stores a Partition[T] under the key K in the store.
-// It returns the index of the shard where the value was stored.
-// The shard index is determined by the ShardKeyFunc provided in the store's options.
-// If the key already exists, it updates the value in the corresponding shard.
-func (s *ShardedStore[T, K]) Set(k K, v Partition[T, K]) (shardIndex int) {
-	shardIndex = s.store.Set(k, v, s.ShardKeyFunc)
-	return
+// Set stores a Partition under key k (not typically used once GetOrCreate is available).
+func (s *ShardedStore[T, K]) Set(k K, p Partition[T, K]) int {
+	return s.store.Set(k, p, s.ShardKeyFunc)
 }
 
-// Keys returns a slice of all keys currently stored in the ShardedStore.
-// It iterates through all shards and collects the keys from each shard's sync.Map.
-func (s *ShardedStore[T, K]) Keys() []K {
-	keys := make([]K, 0)
-	for shardIndex := range s.store {
-		shard := s.store[shardIndex]
-		if shard == nil {
+// GetOrCreate returns the Partition for key k if it exists, otherwise it atomically
+// creates it using the provided creator. The creation is guarded so that at most one
+// Partition is constructed per key even under concurrent calls.
+func (s *ShardedStore[T, K]) GetOrCreate(k K, creator func() Partition[T, K]) Partition[T, K] {
+	idx := int(s.ShardKeyFunc(k, len(s.store)))
+	if idx < 0 || idx >= len(s.store) {
+		idx = 0
+	}
+	sh := s.store[idx]
+	// Defensive: ensure shard exists in case Initialize wasn't called.
+	if sh == nil {
+		sh = &sync.Map{}
+		s.store[idx] = sh
+	}
+
+	// Fast path
+	if existing, ok := sh.Load(k); ok {
+		switch v := existing.(type) {
+		case Partition[T, K]:
+			return v
+		case *partitionHolder[T, K]:
+			v.once.Do(func() {
+				if v.p == nil {
+					v.p = creator()
+				}
+			})
+			return v.p
+		default:
+			p := creator()
+			sh.Store(k, p)
+			return p
+		}
+	}
+
+	// Slow path: publish a holder, or observe another holder/publication.
+	h := &partitionHolder[T, K]{}
+	actual, loaded := sh.LoadOrStore(k, h)
+	if loaded {
+		switch v := actual.(type) {
+		case Partition[T, K]:
+			return v
+		case *partitionHolder[T, K]:
+			v.once.Do(func() {
+				if v.p == nil {
+					v.p = creator()
+				}
+			})
+			return v.p
+		default:
+			p := creator()
+			sh.Store(k, p)
+			return p
+		}
+	}
+
+	// We stored the holder; initialize once.
+	h.once.Do(func() { h.p = creator() })
+	return h.p
+}
+
+// Keys returns all keys currently stored.
+func (s *ShardedStore[T, K]) Keys() []K { return s.store.Keys() }
+
+// Close clears all entries in the ShardedStore and calls Close() on values that implement
+// the local Closeable interface (if any). We don't assume that Partition has Close() in
+// its interface; many concrete partitions do implement Closeable (e.g., window partitions).
+func (s *ShardedStore[T, K]) Close() {
+	for _, sh := range s.store {
+		if sh == nil {
 			continue
 		}
-		shard.Range(func(k, _ interface{}) bool {
+		sh.Range(func(k, v any) bool {
+			if c, ok := v.(Closeable); ok {
+				c.Close()
+			} else if holder, ok := v.(*partitionHolder[T, K]); ok {
+				if holder.p != nil {
+					if c2, ok := any(holder.p).(Closeable); ok {
+						c2.Close()
+					}
+				}
+			}
+			// It is valid to delete while ranging a sync.Map.
+			sh.Delete(k)
+			return true
+		})
+	}
+}
+
+// === Internal shard machinery ===
+
+type store[K comparable] []*sync.Map
+
+func (s store[K]) Initialize() {
+	for i := range s {
+		if s[i] == nil {
+			s[i] = &sync.Map{}
+		}
+	}
+}
+
+func (s store[K]) Set(k K, V any, keyFunc ShardKeyFunc[K]) int {
+	index := int(keyFunc(k, len(s)))
+	if index < 0 || index >= len(s) {
+		index = 0
+	}
+	sh := s[index]
+	if sh == nil {
+		sh = &sync.Map{}
+		s[index] = sh
+	}
+	sh.Store(k, V)
+	return index
+}
+
+func (s store[K]) Get(k K, keyFunc ShardKeyFunc[K]) (any, bool) {
+	index := int(keyFunc(k, len(s)))
+	if index < 0 || index >= len(s) {
+		index = 0
+	}
+	sh := s[index]
+	if sh == nil {
+		return nil, false
+	}
+	return sh.Load(k)
+}
+
+func (s store[K]) Keys() []K {
+	keys := make([]K, 0)
+	for _, sh := range s {
+		if sh == nil {
+			continue
+		}
+		sh.Range(func(k, _ any) bool {
 			keys = append(keys, k.(K))
 			return true
 		})
@@ -80,98 +209,22 @@ func (s *ShardedStore[T, K]) Keys() []K {
 	return keys
 }
 
-// Close clears all entries in the ShardedStore.
-// It iterates through all shards and deletes each key-value pair.
-func (s *ShardedStore[T, K]) Close() {
-	for shardIndex := range s.store {
-		shard := s.store[shardIndex]
-		if shard == nil {
-			continue
-		}
-		shard.Range(func(k, v interface{}) bool {
-			if p, ok := v.(Closeable); ok {
-				p.Close()
-			}
-			shard.Delete(k)
-			return true
-		})
-	}
-}
-
-func (s *ShardedStore[T, K]) Initialize() {
-	s.store.Initialize()
-}
-
-// store is a slice of sync.Map, where each map represents a shard.
-
-type store[K comparable] []*sync.Map
-
-func (s store[K]) Set(k K, V interface{}, keyFunc ShardKeyFunc[K]) int {
-	index := int(keyFunc(k, len(s)))
-	if index < 0 || index >= len(s) {
-		index = 0 // Fallback to the first shard if index is out of bounds
-	}
-
-	shard := s[index]
-	if shard == nil {
-		shard = &sync.Map{}
-		s[index] = shard
-	}
-	shard.Store(k, V)
-	return index
-}
-
-func (s store[K]) Get(k interface{}, shardKeyFunc ShardKeyFunc[K]) (interface{}, bool) {
-	index := int(shardKeyFunc(k.(K), len(s)))
-	shard := s[index]
-	if shard == nil {
-		return nil, false
-	}
-	value, ok := shard.Load(k)
-	if !ok {
-		return nil, false
-	}
-	return value, true
-}
-
-func (s store[K]) Initialize() {
-	for i := range s {
-		s[i] = &sync.Map{}
-	}
-}
-
-// ModulusHash implements a simple sharding strategy using the modulo operator (%).
-//
-// It works by converting the key into a 64-bit hash and then finding the
-// remainder when that hash is divided by the total number of shards.
-//
-// While very fast, its major drawback is that changing the shard count causes
-// most keys to be remapped to new shards. It is best used when the number of
-// shards is fixed and will not change.
+// ModulusHash maps a key to a shard using a 64-bit hash modulo.
+// Uses deterministic FNV-1a over fmt.Sprint(k) for stable, testable results.
 func ModulusHash[K comparable](k K, shardCount int) uint64 {
 	if shardCount <= 1 {
 		return 0
 	}
-
-	key := toHashKey(k)
-	return key % uint64(shardCount)
+	return toHashKey(k) % uint64(shardCount)
 }
 
-// JumpHash implements Jump Consistent Hash, a fast, minimalist algorithm from a
-// 2014 Google paper by Lamping and Ringenburg.
-//
-// Its primary advantage is that it requires the minimum number of keys to be
-// remapped when the number of shards (buckets) changes, unlike modulus hashing.
-//
-// It works by converting the key into a 64-bit integer which is used as a
-// random seed. It then deterministically "jumps" forward through bucket indices
-// until it lands on the one designated for the key within the given shardCount.
+// JumpHash implements Jump Consistent Hash (Lamping & Veach, 2014).
+// It operates on a uint64 key so the right shift is logical (not arithmetic).
 func JumpHash[K comparable](k K, shardCount int) uint64 {
 	if shardCount <= 1 {
 		return 0
 	}
-
-	key := toHashKey(k)
+	key := toHashKey(k) // uint64
 	var b int64 = -1
 	var j int64 = 0
 	for j < int64(shardCount) {
@@ -182,8 +235,8 @@ func JumpHash[K comparable](k K, shardCount int) uint64 {
 	return uint64(b)
 }
 
-// toHashKey converts a comparable key into a 64-bit hash using FNV-1a hashing.
-// If the key is written to the hash fails, it returns 0 and get added to the default shard.
+// toHashKey converts a comparable key into a 64-bit hash using FNV-1a on fmt.Sprint(k).
+// This mirrors the previous implementation and keeps shard indexes deterministic for tests.
 func toHashKey[K comparable](k K) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(fmt.Sprint(k)))

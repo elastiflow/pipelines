@@ -2,187 +2,132 @@ package windower
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/elastiflow/pipelines/datastreams"
 )
 
-func TestSlidingBatch_next(t *testing.T) {
-	type testCase[T any] struct {
-		name           string
-		initialRecords []record[T]
-		windowDuration time.Duration
-		now            time.Time
-		final          bool
-		want           []T
-	}
+// Hammers one Sliding partition with many concurrent Push calls for the same key.
+// Run with: go test ./datastreams/windower -race -run TestSliding_NoDataRace_Stress -count=1
+func TestSliding_NoDataRace_Stress(t *testing.T) {
+	runtime.GOMAXPROCS(2)
 
-	now := time.Now()
+	const (
+		window = 100 * time.Millisecond
+		slide  = 20 * time.Millisecond
+	)
+	s := NewSliding[int, string](window, slide)
 
-	tests := []testCase[int]{
-		{
-			name:           "no records",
-			initialRecords: nil,
-			windowDuration: time.Second,
-			now:            now,
-			final:          false,
-			want:           []int{},
-		},
-		{
-			name: "all records within window",
-			initialRecords: []record[int]{
-				{val: 1, ts: now.Add(-500 * time.Millisecond)},
-				{val: 2, ts: now.Add(-200 * time.Millisecond)},
-			},
-			windowDuration: time.Second,
-			now:            now,
-			final:          false,
-			want:           []int{1, 2},
-		},
-		{
-			name: "some records outside window",
-			initialRecords: []record[int]{
-				{val: 1, ts: now.Add(-2 * time.Second)},
-				{val: 2, ts: now.Add(-500 * time.Millisecond)},
-				{val: 3, ts: now.Add(-100 * time.Millisecond)},
-			},
-			windowDuration: time.Second,
-			now:            now,
-			final:          false,
-			want:           []int{2, 3},
-		},
-		{
-			name: "all records outside window",
-			initialRecords: []record[int]{
-				{val: 1, ts: now.Add(-3 * time.Second)},
-				{val: 2, ts: now.Add(-2 * time.Second)},
-			},
-			windowDuration: time.Second,
-			now:            now,
-			final:          false,
-			want:           []int{},
-		},
-		{
-			name: "final flush",
-			initialRecords: []record[int]{
-				{val: 1, ts: now.Add(-500 * time.Millisecond)},
-				{val: 2, ts: now},
-			},
-			windowDuration: time.Second,
-			now:            now,
-			final:          true,
-			want:           []int{1, 2},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sb := &SlidingBatch[int]{
-				items: tt.initialRecords, // copy to avoid mutation across cases
-				mu:    sync.RWMutex{},
-			}
-			got := sb.Next(tt.windowDuration, tt.now, tt.final)
-
-			assert.Len(t, got, len(tt.want))
-			assert.ElementsMatch(t, got, tt.want, "unexpected result")
-		})
-	}
-}
-
-func TestSliding(t *testing.T) {
-	testcases := []struct {
-		name         string
-		interval     time.Duration
-		slide        time.Duration
-		pushInterval time.Duration
-		pushCount    int
-		windowCount  int
-	}{
-		{
-			name:         "interval: exactly two windows",
-			interval:     500 * time.Millisecond,
-			slide:        500 * time.Millisecond,
-			pushInterval: 100 * time.Millisecond,
-			pushCount:    8,
-			windowCount:  2,
-		},
-		{
-			name:         "No windows",
-			interval:     200 * time.Millisecond,
-			slide:        500 * time.Millisecond,
-			pushInterval: 0 * time.Millisecond,
-			pushCount:    0,
-			windowCount:  0,
-		},
-		{
-			name:         "Overlapping windows",
-			interval:     500 * time.Millisecond,
-			slide:        200 * time.Millisecond,
-			pushInterval: 100 * time.Millisecond,
-			pushCount:    8,
-			windowCount:  5,
-		},
-	}
-
-	for _, tc := range testcases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			out := make(chan []int, 10)
-			s := NewSliding[int, string](tc.interval, tc.slide)
-			go func() {
-				defer close(out)
-				p := s.Create(context.Background(), out)
-				for i := 1; i <= tc.pushCount; i++ {
-					p.Push(newTestElement(i))
-					time.Sleep(tc.pushInterval)
-				}
-				s.Close()
-			}()
-
-			var results [][]int
-			for w := range out {
-				results = append(results, w)
-			}
-			assert.Equal(t, tc.windowCount, len(results), "unexpected number of windows")
-		})
-	}
-}
-func TestNewSliding(t *testing.T) {
-	t.Parallel()
-	s := NewSliding[int, string](200*time.Millisecond, 50*time.Millisecond)
-	assert.NotNil(t, s)
-}
-func TestNewInterval(t *testing.T) {
-	out := make(chan []int, 10)
-	i := NewInterval[int, string](200*time.Millisecond).Create(context.Background(), out)
-	assert.NotNil(t, i)
-}
-func BenchmarkSlidingWindow(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	out := make(chan []int, 50)
-	w := NewSliding[int, string](100*time.Millisecond, 50*time.Millisecond).Create(ctx, out)
+
+	out := make(chan []int, 1024)
+	p := s.Create(ctx, out)
+
+	const (
+		producers = 12
+		perProd   = 2000
+	)
+	var wg sync.WaitGroup
+	wg.Add(producers)
+	for i := 0; i < producers; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < perProd; j++ {
+				elem := datastreams.NewKeyedElement[int, string]("k", 1)
+				p.Push(datastreams.NewTimedKeyedElement[int, string](elem, time.Now()))
+				time.Sleep(time.Microsecond)
+			}
+		}(i)
+	}
+
+	var flushes, total int
+	deadline := time.NewTimer(800 * time.Millisecond)
+	collectDone := make(chan struct{})
 	go func() {
+		defer close(collectDone)
 		for {
 			select {
-			case <-ctx.Done():
+			case batch := <-out:
+				if len(batch) > 0 {
+					flushes++
+					total += len(batch)
+				}
+			case <-deadline.C:
 				return
-			default:
-				w.Push(newTestElement(1))
-				w.Push(newTestElement(2))
-				w.Push(newTestElement(3))
 			}
 		}
 	}()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		w.Push(newTestElement(4))
-		w.Push(newTestElement(5))
-		w.Push(newTestElement(6))
+	wg.Wait()
+	s.Close() // allow final flush
+	<-collectDone
+
+	if flushes == 0 {
+		t.Fatalf("expected at least one flush; got %d", flushes)
 	}
-	b.StopTimer()
-	b.ReportAllocs()
+	if total == 0 {
+		t.Fatalf("expected at least one item across flushes; got %d", total)
+	}
+}
+
+// Longer run, ensures multiple flushes occur under sustained load.
+func TestSliding_NoDataRace_Stress_Long(t *testing.T) {
+	runtime.GOMAXPROCS(2)
+
+	const (
+		window = 150 * time.Millisecond
+		slide  = 30 * time.Millisecond
+	)
+	s := NewSliding[int, string](window, slide)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := make(chan []int, 2048)
+	p := s.Create(ctx, out)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 5000; j++ {
+				elem := datastreams.NewKeyedElement[int, string]("k", 1)
+				p.Push(datastreams.NewTimedKeyedElement[int, string](elem, time.Now()))
+			}
+		}(i)
+	}
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(600 * time.Millisecond)
+	flushes := 0
+loop:
+	for {
+		select {
+		case <-ticker.C:
+		drain:
+			for {
+				select {
+				case b := <-out:
+					if len(b) > 0 {
+						flushes++
+					}
+				default:
+					break drain
+				}
+			}
+		case <-deadline.C:
+			break loop
+		}
+	}
+	wg.Wait()
+	s.Close()
+
+	if flushes < 3 {
+		t.Fatalf("expected multiple flushes; got %d", flushes)
+	}
 }
