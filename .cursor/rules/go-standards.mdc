@@ -1,0 +1,63 @@
+# Go Coding Standards
+
+## General Principles
+- Follow Go idioms and best practices as outlined in [Effective Go](https://golang.org/doc/effective_go.html)
+- Use Go 1.23+ features appropriately
+- Prioritize readability and maintainability over cleverness
+- Write self-documenting code with clear variable and function names
+
+## Code Style
+- Use `gofmt` for consistent formatting (run `go fmt ./...`)
+- Use `golint` and `staticcheck` for code quality (run `make staticcheck`)
+- Prefer explicit error handling over panic/recover
+- Use meaningful variable names that reflect their purpose
+- Keep functions focused and under 50 lines when possible
+
+## Package Structure
+- Follow standard Go package naming conventions
+- Use lowercase package names
+- Group related functionality in the same package
+- Export only what's necessary for external consumption
+
+## Error Handling
+- Always check and handle errors explicitly
+- Use `fmt.Errorf` with context: `fmt.Errorf("failed to process item %d: %w", id, err)`
+- Return errors up the call stack rather than logging and continuing
+- Use custom error types for domain-specific errors
+
+## Concurrency Patterns
+- Use channels for communication between goroutines
+- Prefer composition over inheritance
+- Use `context.Context` for cancellation and timeouts
+- Always use `sync.WaitGroup` when spawning goroutines
+- Close channels from the sender side, not the receiver
+
+## Generic Usage
+- Use generics for type-safe operations on collections
+- Prefer `any` over `interface{}` for Go 1.18+ code
+- Use type constraints to ensure type safety
+- Keep generic functions focused and well-documented
+
+## Documentation
+- Write package-level documentation in `doc.go` files
+- Document exported functions with clear examples
+- Use `// Package` comments for package documentation
+- Include usage examples in test files
+
+## Testing
+- Aim for 85%+ test coverage
+- Use table-driven tests for multiple test cases
+- Use `t.Parallel()` for independent test functions
+- Mock external dependencies appropriately
+- Use `testify` for assertions and test utilities
+
+## Performance
+- Profile before optimizing
+- Use buffered channels when appropriate
+- Prefer value types over pointers for small structs
+- Use `sync.Pool` for frequently allocated objects
+- Benchmark critical paths with `go test -bench`
+description:
+globs:
+alwaysApply: true
+---

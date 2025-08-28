@@ -1,0 +1,247 @@
+# Development Workflow
+
+## Getting Started
+
+### Prerequisites
+- Go 1.23+ installed
+- Git configured
+- GitHub account for contributions
+
+### Setup Development Environment
+```bash
+# Clone the repository
+git clone https://github.com/elastiflow/pipelines
+cd pipelines
+
+# Install dependencies
+go mod tidy
+
+# Verify setup
+go test ./...
+```
+
+## Development Workflow
+
+### 1. Create Feature Branch
+```bash
+# Ensure main is up to date
+git checkout main
+git pull upstream main
+
+# Create feature branch
+git checkout -b feature/your-feature-name
+```
+
+### 2. Make Changes
+- Follow Go coding standards
+- Write tests for new functionality
+- Update documentation as needed
+- Use meaningful commit messages
+
+### 3. Code Quality Checks
+```bash
+# Format code
+go fmt ./...
+
+# Run linters
+make staticcheck
+
+# Run tests
+make test-unit
+
+# Check coverage
+make test-unit-report-coverage
+```
+
+### 4. Commit and Push
+```bash
+# Stage changes
+git add .
+
+# Commit with descriptive message
+git commit -m "Add feature: brief description
+
+- Detailed change 1
+- Detailed change 2
+- Fixes #123"
+
+# Push to your fork
+git push origin feature/your-feature-name
+```
+
+### 5. Create Pull Request
+- Use the PR template
+- Include tests and documentation
+- Request review from maintainers
+- Address feedback promptly
+
+## Testing Requirements
+
+### Coverage Targets
+- **New Code**: 90%+ coverage required
+- **Overall Project**: 85%+ coverage maintained
+- **Critical Paths**: 95%+ coverage
+
+### Test Types
+```bash
+# Unit tests
+make test-unit
+
+# Integration tests
+make test-integration
+
+# Benchmarks
+go test -bench=. ./...
+
+# Race detection
+go test -race ./...
+```
+
+### Test Naming Conventions
+- Unit tests: `TestFunctionName`
+- Integration tests: `TestIntegration_FeatureName`
+- Benchmarks: `BenchmarkFunctionName`
+- Examples: `ExampleFunctionName`
+
+## Code Review Process
+
+### Before Submitting
+- [ ] Code compiles without errors
+- [ ] All tests pass
+- [ ] Code is formatted with `go fmt`
+- [ ] Linting passes (`make staticcheck`)
+- [ ] Coverage meets requirements
+- [ ] Documentation is updated
+
+### Review Checklist
+- [ ] Code follows Go idioms
+- [ ] Error handling is appropriate
+- [ ] Concurrency patterns are correct
+- [ ] Tests cover edge cases
+- [ ] Performance considerations addressed
+- [ ] No resource leaks
+
+## Documentation Standards
+
+### Code Documentation
+- Package-level docs in `doc.go` files
+- Export function documentation with examples
+- Use `// Package` comments for package overview
+- Include usage examples in test files
+
+### README Updates
+- Update README.md for new features
+- Include usage examples
+- Document breaking changes
+- Update version information
+
+## Performance Considerations
+
+### Benchmarking
+```bash
+# Run benchmarks
+go test -bench=. ./...
+
+# Profile specific functions
+go test -bench=BenchmarkFunctionName -cpuprofile=cpu.prof
+
+# Memory profiling
+go test -bench=BenchmarkFunctionName -memprofile=mem.prof
+```
+
+### Performance Guidelines
+- Profile before optimizing
+- Use appropriate buffer sizes
+- Avoid unnecessary allocations
+- Use `sync.Pool` for frequently allocated objects
+- Benchmark critical paths
+
+## Common Issues and Solutions
+
+### Build Issues
+```bash
+# Clean and rebuild
+make clean
+go mod tidy
+go build ./...
+
+# Check Go version
+go version
+```
+
+### Test Issues
+```bash
+# Run tests with verbose output
+go test -v ./...
+
+# Run specific test
+go test -run TestFunctionName ./...
+
+# Check test coverage
+go test -cover ./...
+```
+
+### Dependency Issues
+```bash
+# Update dependencies
+go get -u ./...
+go mod tidy
+
+# Check for security vulnerabilities
+go list -m all | go list -m -u all
+```
+
+## Release Process
+
+### Version Management
+- Use semantic versioning (MAJOR.MINOR.PATCH)
+- Update version in relevant files
+- Create release notes
+- Tag releases in Git
+
+### Pre-release Checklist
+- [ ] All tests pass
+- [ ] Coverage meets requirements
+- [ ] Documentation is updated
+- [ ] Breaking changes documented
+- [ ] Performance benchmarks pass
+- [ ] Security scan completed
+
+## Contributing Guidelines
+
+### Code Style
+- Follow [Effective Go](https://golang.org/doc/effective_go.html)
+- Use `gofmt` for formatting
+- Follow project naming conventions
+- Write self-documenting code
+
+### Commit Messages
+- Use present tense ("Add feature" not "Added feature")
+- First line is summary (50 chars or less)
+- Include detailed description if needed
+- Reference issues with "Fixes #123"
+
+### Pull Request Guidelines
+- Keep PRs focused and small
+- Include tests for new functionality
+- Update documentation as needed
+- Respond to review feedback promptly
+- Squash commits before merging
+
+## Getting Help
+
+### Resources
+- [Go Documentation](https://golang.org/doc/)
+- [Effective Go](https://golang.org/doc/effective_go.html)
+- [Go Blog](https://blog.golang.org/)
+- [Go Playground](https://play.golang.org/)
+
+### Community
+- GitHub Issues for bug reports
+- GitHub Discussions for questions
+- Pull requests for contributions
+- Code reviews for feedback
+description:
+globs:
+alwaysApply: true
+---

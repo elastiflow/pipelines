@@ -1,0 +1,200 @@
+# Code Review Checklist
+
+## General Code Quality
+
+### [ ] Code Compilation
+- [ ] Code compiles without errors
+- [ ] No unused imports or variables
+- [ ] All dependencies are properly declared
+
+### [ ] Go Standards Compliance
+- [ ] Follows [Effective Go](https://golang.org/doc/effective_go.html) guidelines
+- [ ] Uses `gofmt` formatting
+- [ ] Follows project naming conventions
+- [ ] Uses appropriate Go idioms
+
+### [ ] Code Readability
+- [ ] Clear and descriptive variable names
+- [ ] Functions are focused and under 50 lines
+- [ ] Complex logic is well-commented
+- [ ] Code is self-documenting
+
+## Pipeline-Specific Review
+
+### [ ] Concurrency Patterns
+- [ ] Proper use of `context.Context` for cancellation
+- [ ] `sync.WaitGroup` used when spawning goroutines
+- [ ] Channels are properly buffered and sized
+- [ ] No goroutine leaks or deadlocks
+- [ ] Proper error handling in concurrent operations
+
+### [ ] Error Handling
+- [ ] All errors are properly checked and handled
+- [ ] Error messages provide useful context
+- [ ] Uses `fmt.Errorf` with `%w` for error wrapping
+- [ ] No error swallowing without proper handling
+- [ ] Custom error types for domain-specific errors
+
+### [ ] Resource Management
+- [ ] Proper cleanup of resources (channels, goroutines)
+- [ ] Use of `defer` for cleanup operations
+- [ ] No resource leaks in error paths
+- [ ] Appropriate use of `sync.Pool` for frequent allocations
+
+### [ ] Performance Considerations
+- [ ] Appropriate buffer sizes for channels
+- [ ] Efficient data structures and algorithms
+- [ ] No unnecessary allocations in hot paths
+- [ ] Proper worker scaling for concurrency
+
+## Testing and Coverage
+
+### [ ] Test Coverage
+- [ ] New code has 90%+ test coverage
+- [ ] Critical paths have 95%+ coverage
+- [ ] Edge cases and error conditions are tested
+- [ ] Integration tests for pipeline flows
+
+### [ ] Test Quality
+- [ ] Tests are focused and test one thing
+- [ ] Uses table-driven tests for multiple scenarios
+- [ ] Proper mocking of external dependencies
+- [ ] Tests are deterministic and repeatable
+- [ ] Benchmark tests for performance-critical code
+
+### [ ] Test Naming and Organization
+- [ ] Test functions follow naming convention
+- [ ] Test files are properly organized
+- [ ] Examples are included for public APIs
+- [ ] Test data generation is efficient
+
+## Documentation
+
+### [ ] Code Documentation
+- [ ] Package-level documentation in `doc.go`
+- [ ] Exported functions have clear documentation
+- [ ] Examples are provided for complex APIs
+- [ ] Comments explain "why" not "what"
+
+### [ ] README and Examples
+- [ ] README is updated for new features
+- [ ] Examples demonstrate proper usage
+- [ ] Breaking changes are documented
+- [ ] Installation and setup instructions are clear
+
+## Security and Safety
+
+### [ ] Input Validation
+- [ ] All inputs are properly validated
+- [ ] No potential for buffer overflows
+- [ ] Proper bounds checking on slices and arrays
+- [ ] Sanitization of user inputs
+
+### [ ] Error Information
+- [ ] No sensitive information in error messages
+- [ ] Stack traces are not exposed in production
+- [ ] Proper logging levels for different environments
+
+## Pipeline Architecture
+
+### [ ] Design Patterns
+- [ ] Follows established pipeline patterns
+- [ ] Proper separation of concerns
+- [ ] Components are composable and reusable
+- [ ] No tight coupling between components
+
+### [ ] Data Flow
+- [ ] Clear data flow through pipeline stages
+- [ ] Proper error propagation between stages
+- [ ] No data loss in error scenarios
+- [ ] Appropriate backpressure handling
+
+### [ ] Configuration
+- [ ] Configuration is flexible and well-documented
+- [ ] Sensible defaults are provided
+- [ ] Configuration validation is implemented
+- [ ] Environment-specific configuration is supported
+
+## Performance and Scalability
+
+### [ ] Benchmarking
+- [ ] Performance-critical code is benchmarked
+- [ ] Benchmarks use realistic data sizes
+- [ ] Memory allocations are tracked
+- [ ] Performance regressions are caught
+
+### [ ] Scalability
+- [ ] Code scales with available resources
+- [ ] No hard-coded limits that prevent scaling
+- [ ] Efficient algorithms for large datasets
+- [ ] Proper resource cleanup for long-running operations
+
+## Review Process
+
+### [ ] Before Review
+- [ ] Code compiles and all tests pass
+- [ ] Linting passes (`make staticcheck`)
+- [ ] Coverage requirements are met
+- [ ] Documentation is updated
+
+### [ ] During Review
+- [ ] Review for correctness and completeness
+- [ ] Check for security vulnerabilities
+- [ ] Verify performance characteristics
+- [ ] Ensure maintainability and readability
+
+### [ ] After Review
+- [ ] All feedback is addressed
+- [ ] Changes are properly tested
+- [ ] Documentation is updated if needed
+- [ ] Code is ready for merge
+
+## Common Issues to Watch For
+
+### [ ] Concurrency Issues
+- [ ] Race conditions
+- [ ] Deadlocks
+- [ ] Goroutine leaks
+- [ ] Channel misuse
+
+### [ ] Memory Issues
+- [ ] Memory leaks
+- [ ] Excessive allocations
+- [ ] Large object retention
+- [ ] Inefficient data structures
+
+### [ ] Error Handling Issues
+- [ ] Silent failures
+- [ ] Error context loss
+- [ ] Improper error propagation
+- [ ] Error recovery gaps
+
+### [ ] Performance Issues
+- [ ] Unnecessary allocations
+- [ ] Inefficient algorithms
+- [ ] Blocking operations
+- [ ] Resource contention
+
+## Review Comments
+
+### Positive Feedback
+- [ ] Highlight good patterns and practices
+- [ ] Acknowledge clever solutions
+- [ ] Praise clear and readable code
+- [ ] Recognize good test coverage
+
+### Constructive Feedback
+- [ ] Be specific about issues
+- [ ] Suggest alternatives when possible
+- [ ] Explain the reasoning behind suggestions
+- [ ] Offer to help with implementation
+
+### Review Tone
+- [ ] Be respectful and constructive
+- [ ] Focus on the code, not the person
+- [ ] Ask questions to understand intent
+- [ ] Provide actionable feedback
+description:
+globs:
+alwaysApply: true
+---

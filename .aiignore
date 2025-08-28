@@ -1,0 +1,116 @@
+# JetBrains Junie .aiignore
+# Purpose: Exclude non-essential, generated, large, and third-party assets from AI context,
+# while keeping source code, tests, configs, and docs available.
+# Docs: https://www.jetbrains.com/help/junie/aiignore.html
+
+############################
+# 1) Always ignore
+############################
+# VCS and metadata
+.git/
+.gitignore
+.gitattributes
+
+# OS/Editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*.orig
+
+# Archives and large blobs
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+*.7z
+*.rar
+*.iso
+
+# Binary artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.bin
+*.obj
+*.o
+*.a
+*.wasm
+
+############################
+# 2) Language/build tool outputs
+############################
+# Go build outputs and test binaries
+bin/
+build/
+dist/
+*.test
+
+# Coverage and profiling artifacts
+coverage/
+*.out
+*.cover
+*.coverprofile
+*.cov
+*.pprof
+
+# Dependency/vendor directories (not currently used, but safe to ignore if added)
+vendor/
+node_modules/
+
+# Generic caches and environments
+.cache/
+.venv/
+venv/
+.env
+.env.*
+
+############################
+# 3) Large/static media
+############################
+# Exclude images and other media from docs to save context budget
+# (Developers can still view them in the repo; AI doesn’t need them.)
+docs/**/*.png
+docs/**/*.jpg
+docs/**/*.jpeg
+docs/**/*.svg
+docs/**/*.gif
+
+############################
+# 4) Explicit includes (negations)
+############################
+# Keep core project metadata and configuration
+!LICENSE
+!README.md
+!CONTRIBUTING.md
+!Makefile
+!sonar-project.properties
+!go.mod
+!go.sum
+
+# Keep documentation sources (text)
+!docs/**/*.md
+!doc.go
+
+# Keep CI and repository automation configs
+!.github/
+!.github/**/*
+
+# Keep build scripts and make includes
+!scripts/**
+!mk/**
+
+# Keep all Go source and tests everywhere
+!**/*.go
+!**/*_test.go
+
+# Keep example tests (documentation via tests)
+!example_*.go
+!example_*_test.go
+
+AGENTS.md

@@ -1,0 +1,102 @@
+# Pipeline Design Patterns
+
+## Core Architecture Principles
+- **Separation of Concerns**: Keep sources, transformations, and sinks separate
+- **Composability**: Design stages that can be easily combined and reused
+- **Error Propagation**: Handle errors gracefully and propagate them up the pipeline
+- **Resource Management**: Properly manage goroutines, channels, and memory
+
+## Pipeline Structure
+```
+Source → DataStream → Transformations → Sink
+   ↓         ↓            ↓           ↓
+Channel → Processing → Filter/Map → Output
+```
+
+## DataStream Design Patterns
+
+### 1. Builder Pattern
+- Use method chaining for pipeline construction
+- Return `DataStream[T]` from each transformation method
+- Allow for fluent API: `ds.Filter(...).Map(...).Run(...)`
+
+### 2. Functional Composition
+- Each transformation should be a pure function when possible
+- Use `ProcessFunc[T]`, `TransformFunc[T,U]`, and `FilterFunc[T]`
+- Avoid side effects in transformation functions
+
+### 3. Error Handling Strategy
+- Use `SkipError: true` in Params for non-critical errors
+- Log errors with context using segment names
+- Provide fallback values or skip problematic items
+
+## Concurrency Patterns
+
+### Fan-Out/Fan-In
+- Use `FanOut()` to distribute work across multiple workers
+- Use `FanIn()` to merge results from parallel processing
+- Balance parallelism with resource usage
+
+### Broadcast Pattern
+- Use `Broadcast()` to send data to multiple consumers
+- Useful for logging, monitoring, and parallel processing
+- Ensure each consumer can handle the data independently
+
+### Window Processing
+- Use `TumblingWindow` for fixed-size, non-overlapping windows
+- Use `SlidingWindow` for overlapping windows with time-based triggers
+- Implement proper watermark handling for time-based operations
+
+## Performance Considerations
+
+### Buffer Sizing
+- Use appropriate `BufferSize` in Params to prevent blocking
+- Larger buffers use more memory but reduce blocking
+- Monitor channel buffer usage and adjust accordingly
+
+### Goroutine Management
+- Always use `sync.WaitGroup` when spawning goroutines
+- Use `context.Context` for cancellation
+- Avoid goroutine leaks by ensuring proper cleanup
+
+### Memory Management
+- Use `sync.Pool` for frequently allocated objects
+- Process data in batches when appropriate
+- Monitor memory usage in long-running pipelines
+
+## Testing Patterns
+
+### Unit Testing
+- Test each transformation function independently
+- Use table-driven tests for multiple input scenarios
+- Mock external dependencies
+
+### Integration Testing
+- Test complete pipeline configurations
+- Verify error handling and recovery
+- Test with realistic data volumes
+
+### Benchmark Testing
+- Benchmark critical transformation functions
+- Test pipeline throughput under load
+- Profile memory usage and goroutine count
+
+## Common Anti-Patterns to Avoid
+
+1. **Blocking Operations**: Don't perform blocking I/O in transformation functions
+2. **Shared State**: Avoid mutable shared state between goroutines
+3. **Unbounded Channels**: Always set appropriate buffer sizes
+4. **Error Swallowing**: Don't ignore errors without proper handling
+5. **Resource Leaks**: Ensure proper cleanup of goroutines and channels
+
+## Best Practices
+
+1. **Start Simple**: Begin with basic pipelines and add complexity gradually
+2. **Monitor Performance**: Use profiling tools to identify bottlenecks
+3. **Handle Backpressure**: Implement backpressure handling for slow consumers
+4. **Log Strategically**: Use segment names for debugging and monitoring
+5. **Test Edge Cases**: Test with empty streams, error conditions, and large datasets
+description:
+globs:
+alwaysApply: true
+---

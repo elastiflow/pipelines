@@ -1,0 +1,140 @@
+# DataStream Operations
+
+## Core Concepts
+
+### DataStream Structure
+- `DataStream[T]` manages input channels and error streams
+- Use `New[T]()` to create new DataStreams
+- Attach `sync.WaitGroup` with `WithWaitGroup()` for goroutine management
+- Always handle errors through the error channel
+
+### Function Types
+- **ProcessFunc[T]**: `func(T) (T, error)` - transform items of same type
+- **TransformFunc[T,U]**: `func(T) (U, error)` - convert between types
+- **FilterFunc[T]**: `func(T) (bool, error)` - decide if item passes through
+- **ExpandFunc[T,U]**: `func(T) ([]U, error)` - explode items into multiple
+
+## Transformation Methods
+
+### Basic Operations
+```go
+// Process each item
+ds = ds.Run(func(v T) (T, error) {
+    // Transform v and return result
+    return transformed, nil
+})
+
+// Filter items
+ds = ds.Filter(func(v T) (bool, error) {
+    return shouldKeep, nil
+})
+
+// Transform types
+ds = ds.Map(func(v T) (U, error) {
+    return converted, nil
+})
+```
+
+### Concurrency Operations
+```go
+// Fan out to multiple workers
+ds = ds.FanOut(Params{Num: 4})
+
+// Fan in multiple streams
+ds = ds.FanIn()
+
+// Broadcast to multiple consumers
+ds = ds.Broadcast(Params{Num: 3})
+
+// Split into two streams
+stream1, stream2 := ds.Tee()
+```
+
+### Window Operations
+```go
+// Key by function
+kds := ds.KeyBy[K](func(v T) K {
+    return extractKey(v)
+}, Params{BufferSize: 50})
+
+// Apply windowing
+windowed := kds.Window(windowFunc, partitionFactory, Params{})
+```
+
+## Error Handling
+
+### Skip Errors
+```go
+ds = ds.Run(processFunc, Params{
+    SkipError: true,  // Skip items that cause errors
+    SegmentName: "processing-stage", // For error context
+})
+```
+
+### Error Propagation
+- Errors are sent to the error channel
+- Use segment names to identify where errors occur
+- Handle errors in the main pipeline error handler
+- Don't ignore errors without proper handling
+
+## Performance Tuning
+
+### Buffer Sizing
+```go
+ds = ds.Run(processFunc, Params{
+    BufferSize: 1000, // Larger buffers reduce blocking
+})
+```
+
+### Worker Count
+```go
+ds = ds.FanOut(Params{
+    Num: runtime.NumCPU(), // Scale with available cores
+})
+```
+
+## Best Practices
+
+1. **Chain Operations**: Use method chaining for readability
+2. **Handle Errors**: Always provide error handling for transformation functions
+3. **Use Segment Names**: Tag stages for debugging and monitoring
+4. **Manage Resources**: Use WaitGroups and proper cleanup
+5. **Profile Performance**: Benchmark critical paths and optimize accordingly
+
+## Common Patterns
+
+### Pipeline Stage
+```go
+func createProcessingStage[T any](ds DataStream[T]) DataStream[T] {
+    return ds.
+        Filter(filterFunc).
+        Run(processFunc).
+        Map(transformFunc)
+}
+```
+
+### Error Recovery
+```go
+ds = ds.Run(func(v T) (T, error) {
+    result, err := process(v)
+    if err != nil {
+        // Log error and return fallback value
+        log.Printf("Error processing %v: %v", v, err)
+        return fallbackValue, nil
+    }
+    return result, nil
+})
+```
+
+### Batch Processing
+```go
+ds = ds.Window(
+    batchWindowFunc,
+    batchPartitionFactory,
+    Params{BufferSize: 1000},
+)
+```
+description:
+globs:
+alwaysApply: true
+---

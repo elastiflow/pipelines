@@ -13,9 +13,9 @@ Thank you for your interest in contributing to **Pipelines**! We welcome and app
 5. [Coding Guidelines](#coding-guidelines)
 6. [Testing and Coverage](#testing-and-coverage)
 7. [Documentation](#documentation)
-8. [Submitting Changes](#submitting-changes)
-9. [Reporting Issues](#reporting-issues)
-10. [Code of Conduct](#code-of-conduct)
+8. [Cursor Rules](#cursor-rules)
+9. [Submitting Changes](#submitting-changes)
+10. [Reporting Issues](#reporting-issues)
 11. [License](#license)
 
 ---
@@ -33,7 +33,7 @@ Thank you for your interest in contributing to **Pipelines**! We welcome and app
 2. Clone your fork locally:
 
    ```bash
-   git clone https://github.com/<your-username>/pipelines
+   git clone https://github.com/elastiflow/pipelines.git
    cd pipelines
    ```
 
@@ -57,18 +57,25 @@ Thank you for your interest in contributing to **Pipelines**! We welcome and app
 
 ```
 pipelines/
-├── bench/                # Benchmark tests
-├── datastreams/          # Core pipeline primitives and transformations
-│   ├── sources/          # Source implementations
-│   └── sinks/            # Sink implementations
-├── examples/             # Example programs demonstrating usage
-├── pipelines/            # Primary pipeline package
-├── go.mod / go.sum       # Go module files
-├── doc.go                # Package-level documentation
-├── pipeline.go           # Main pipeline definition
-├── pipeline_test.go      # Integration tests for pipeline
-├── README.md             # High-level overview and usage
-└── CONTRIBUTING.md       # (This file)
+├── bench/                        # Benchmark tests for performance/regressions
+├── datastreams/                  # Core pipeline primitives and transformations
+│   ├── sources/                  # Source implementations
+│   ├── sinks/                    # Sink implementations
+│   └── windower/                 # Sliding/tumbling window operators and benches
+├── docs/img/                     # Project images used in docs/README
+├── coverage/                     # Test coverage output (generated)
+│   └── unit/                     # Go test -coverdata artifacts (generated)
+├── mk/go.mk                      # Shared make logic used by root Makefile
+├── AGENTS.md                     # Notes for AI/agent-based workflows
+├── LICENSE                       # Project license (Apache-2.0)
+├── Makefile                      # Build/test/lint targets (see make help)
+├── README.md                     # High-level overview and usage
+├── doc.go                        # Package-level documentation entrypoint
+├── go.mod / go.sum               # Go module files
+├── pipeline.go                   # Main pipeline definition
+├── pipeline_test.go              # End-to-end/integration tests for pipeline
+├── example_*.go                  # Executable documentation via examples
+└── CONTRIBUTING.md               # (This file)
 ```
 
 ---
@@ -149,6 +156,138 @@ pipelines/
 
 ---
 
+## Cursor Rules
+
+This project uses Cursor rules to provide AI assistance and maintain consistent development practices. Cursor rules are stored in the `.cursor/rules` directory and are version-controlled alongside your codebase.
+
+### Understanding Cursor Rules
+
+Cursor rules provide system-level instructions to the AI, offering persistent context, preferences, or workflows specific to this project. They help ensure consistent code quality, testing standards, and development practices across all contributors.
+
+### Rule Structure
+
+Each rule is written in MDC (`.mdc`) format and includes:
+
+```yaml
+---
+description: Brief description of the rule
+globs: ["**/*.go"]  # File patterns for auto-attachment
+alwaysApply: false  # Whether to always include
+---
+```
+
+### Rule Types
+
+- **Always Applied**: Core standards that are always included (e.g., Go coding standards)
+- **Auto-Attached**: Rules that apply based on file patterns (e.g., datastreams-specific guidance)
+- **Agent Requested**: Rules available to AI when needed (e.g., development workflow)
+- **Manual**: Rules that must be explicitly invoked (e.g., `@code-review`)
+
+### Creating and Managing Rules
+
+#### Creating a New Rule
+
+1. **Using Cursor Interface**:
+    - Use the `New Cursor Rule` command within Cursor
+    - Navigate to `Cursor Settings > Rules` to create a new rule file
+    - Rules are automatically created in the `.cursor/rules` directory
+
+2. **Manual Creation**:
+    - Create a new `.mdc` file in the appropriate `.cursor/rules` directory
+    - Follow the MDC format with proper metadata
+    - Place rules in the most specific directory for their scope
+
+#### Rule Organization
+
+```
+.cursor/rules/                    # Project-wide rules
+datastreams/
+  .cursor/rules/                  # Datastream-specific rules
+  sources/
+    .cursor/rules/                # Source-specific rules
+  sinks/
+    .cursor/rules/                # Sink-specific rules
+  windower/
+    .cursor/rules/                # Windowing-specific rules
+```
+
+#### Generating Rules from Conversations
+
+If you've made decisions about agent behavior or development practices:
+
+1. **Use the `/Generate Cursor Rules` command** within the chat interface
+2. **Provide context** about what the rule should cover
+3. **Review and refine** the generated rule before committing
+4. **Test the rule** in context to ensure it's helpful
+
+### Best Practices for Rules
+
+- **Keep rules focused**: Each rule should cover a specific domain or concern
+- **Limit rule size**: Keep rules under 500 lines for clarity
+- **Provide examples**: Include concrete examples and code snippets
+- **Use clear language**: Write rules as you would clear internal documentation
+- **Test in context**: Verify rules work correctly when applied
+- **Update regularly**: Keep rules current with codebase changes
+
+### Common Rule Patterns
+
+#### Domain-Specific Rules
+```mdc
+---
+description: Guidance for working with datastreams package
+globs: ["**/datastreams/**/*.go"]
+alwaysApply: false
+---
+# Datastream Operations
+## Core Concepts
+...
+```
+
+#### Always Applied Rules
+```mdc
+---
+description: Core Go coding standards
+globs: []
+alwaysApply: true
+---
+# Go Coding Standards
+## General Principles
+...
+```
+
+#### Auto-Attached Rules
+```mdc
+---
+description: Testing conventions for benchmarks
+globs: ["**/bench/**/*.go", "**/benchmarks_*.go"]
+alwaysApply: false
+---
+# Benchmark Testing
+## Structure
+...
+```
+
+### Maintaining Rules
+
+1. **Review rules regularly** to ensure they remain relevant
+2. **Update rules** when coding standards or patterns change
+3. **Remove obsolete rules** that are no longer applicable
+4. **Test rule effectiveness** by using them in development
+5. **Gather feedback** from other contributors on rule usefulness
+
+### Rule Validation
+
+Before committing rule changes:
+
+- [ ] Rule follows MDC format correctly
+- [ ] Metadata fields are properly set
+- [ ] Content is clear and actionable
+- [ ] Examples are accurate and up-to-date
+- [ ] Rule has been tested in context
+- [ ] Rule size is under 500 lines
+
+---
+
 ## Submitting Changes
 
 1. Ensure your local branch is rebased onto `main`:
@@ -177,12 +316,6 @@ If you find a bug or have an enhancement request:
     - Relevant logs or error messages
     - Environment details (OS, Go version, etc.)
     - Proposed solutions or workarounds, if any
-
----
-
-## Code of Conduct
-
-We follow the [Contributor Covenant Code of Conduct](https://www.contributor-covenant.org/) to foster a friendly and harassment-free environment. Please be respectful to others and help us maintain a welcoming, inclusive community.
 
 ---
 
