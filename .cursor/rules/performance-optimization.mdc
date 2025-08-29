@@ -1,0 +1,353 @@
+# Performance Optimization
+
+## Profiling Before Optimizing
+
+### CPU Profiling
+```bash
+# Profile CPU usage during benchmark
+go test -bench=BenchmarkFunctionName -cpuprofile=cpu.prof
+
+# Analyze CPU profile
+go tool pprof cpu.prof
+
+# Web interface (requires graphviz)
+go tool pprof -http=:8080 cpu.prof
+```
+
+### Memory Profiling
+```bash
+# Profile memory allocations
+go test -bench=BenchmarkFunctionName -memprofile=mem.prof
+
+# Analyze memory profile
+go tool pprof mem.prof
+
+# Show top memory consumers
+go tool pprof -top mem.prof
+```
+
+### Blocking Profiling
+```bash
+# Profile goroutine blocking
+go test -bench=BenchmarkFunctionName -blockprofile=block.prof
+
+# Analyze blocking profile
+go tool pprof block.prof
+```
+
+## Pipeline Performance Optimization
+
+### Buffer Sizing Strategy
+```go
+// Start with reasonable buffer sizes
+ds = ds.Run(processFunc, Params{
+    BufferSize: 1000, // Start with 1000
+})
+
+// Profile and adjust based on:
+// - Memory usage
+// - Throughput
+// - Blocking behavior
+```
+
+### Worker Scaling
+```go
+// Scale workers with available cores
+numWorkers := runtime.NumCPU()
+ds = ds.FanOut(Params{Num: numWorkers})
+
+// For I/O bound operations, consider more workers
+if isIOBound {
+    numWorkers = runtime.NumCPU() * 2
+}
+```
+
+### Batch Processing
+```go
+// Process items in batches for efficiency
+batchSize := 1000
+ds = ds.Window(
+    batchWindowFunc,
+    batchPartitionFactory,
+    Params{BufferSize: batchSize},
+)
+```
+
+## Memory Optimization
+
+### Object Pooling
+```go
+// Use sync.Pool for frequently allocated objects
+var itemPool = sync.Pool{
+    New: func() interface{} {
+        return &ProcessedItem{
+            Data: make([]byte, 0, 1024),
+        }
+    },
+}
+
+// In processing function
+item := itemPool.Get().(*ProcessedItem)
+defer itemPool.Put(item)
+
+// Reset item for reuse
+item.Data = item.Data[:0]
+```
+
+### Slice Pre-allocation
+```go
+// Pre-allocate slices with known capacity
+func processBatch(items []Input) []Output {
+    results := make([]Output, 0, len(items))
+    
+    for _, item := range items {
+        result := process(item)
+        results = append(results, result)
+    }
+    
+    return results
+}
+```
+
+### Avoiding Unnecessary Allocations
+```go
+// Reuse buffers when possible
+var buffer [1024]byte
+
+func processWithBuffer(data []byte) {
+    // Use buffer instead of allocating new slice
+    copy(buffer[:], data)
+    // Process buffer
+}
+```
+
+## Concurrency Optimization
+
+### Goroutine Management
+```go
+// Use appropriate number of goroutines
+func optimalWorkerCount() int {
+    cpuCount := runtime.NumCPU()
+    
+    // For CPU-bound work
+    if isCPUBound {
+        return cpuCount
+    }
+    
+    // For I/O-bound work
+    if isIOBound {
+        return cpuCount * 2
+    }
+    
+    // For mixed workloads
+    return cpuCount + (cpuCount / 2)
+}
+```
+
+### Channel Optimization
+```go
+// Use buffered channels to reduce blocking
+inputChan := make(chan Data, 1000)
+
+// Size buffers based on expected throughput
+bufferSize := expectedThroughput * processingTime
+ds = ds.Run(processFunc, Params{BufferSize: bufferSize})
+```
+
+### WaitGroup Optimization
+```go
+// Pre-allocate WaitGroup capacity
+var wg sync.WaitGroup
+wg.Add(expectedGoroutines)
+
+// Use defer for cleanup
+defer wg.Wait()
+```
+
+## Algorithm Optimization
+
+### Efficient Data Structures
+```go
+// Use maps for O(1) lookups
+type Cache struct {
+    data map[string]Value
+    mu   sync.RWMutex
+}
+
+// Use slices for ordered data
+type OrderedData []Item
+
+// Use channels for streaming
+type StreamProcessor struct {
+    input  <-chan Data
+    output chan<- Result
+}
+```
+
+### Reduce Allocations in Loops
+```go
+// Avoid allocations in hot loops
+func processItems(items []Item) []Result {
+    results := make([]Result, len(items))
+    
+    for i, item := range items {
+        // Process item without allocating
+        results[i] = processItem(item)
+    }
+    
+    return results
+}
+```
+
+### String Optimization
+```go
+// Use strings.Builder for string concatenation
+func buildString(items []string) string {
+    var builder strings.Builder
+    
+    // Pre-allocate capacity
+    totalLen := 0
+    for _, item := range items {
+        totalLen += len(item)
+    }
+    builder.Grow(totalLen)
+    
+    // Build string
+    for _, item := range items {
+        builder.WriteString(item)
+    }
+    
+    return builder.String()
+}
+```
+
+## Pipeline-Specific Optimizations
+
+### Source Optimization
+```go
+// Use efficient source implementations
+type OptimizedSource[T any] struct {
+    data []T
+    idx  int
+}
+
+func (s *OptimizedSource[T]) Source(ctx context.Context, errStream chan<- error) datastreams.DataStream[T] {
+    outChan := make(chan T, len(s.data))
+    
+    go func() {
+        defer close(outChan)
+        
+        // Batch send for efficiency
+        batchSize := 100
+        for i := 0; i < len(s.data); i += batchSize {
+            end := i + batchSize
+            if end > len(s.data) {
+                end = len(s.data)
+            }
+            
+            // Send batch
+            for j := i; j < end; j++ {
+                select {
+                case <-ctx.Done():
+                    return
+                case outChan <- s.data[j]:
+                }
+            }
+        }
+    }()
+    
+    return datastreams.New(ctx, outChan, errStream)
+}
+```
+
+### Sink Optimization
+```go
+// Use batch processing for sinks
+type BatchSink[T any] struct {
+    batchSize int
+    processor func([]T) error
+}
+
+func (s *BatchSink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    batch := make([]T, 0, s.batchSize)
+    
+    for item := range ds.Out() {
+        batch = append(batch, item)
+        
+        if len(batch) >= s.batchSize {
+            if err := s.processor(batch); err != nil {
+                return err
+            }
+            batch = batch[:0] // Reset slice
+        }
+    }
+    
+    // Process remaining items
+    if len(batch) > 0 {
+        return s.processor(batch)
+    }
+    
+    return nil
+}
+```
+
+## Monitoring and Metrics
+
+### Performance Metrics
+```go
+// Track key performance indicators
+type PipelineMetrics struct {
+    ItemsProcessed    int64
+    ProcessingTime    time.Duration
+    MemoryAllocated   uint64
+    GoroutinesActive  int
+}
+
+func (m *PipelineMetrics) RecordProcessing(duration time.Duration, items int) {
+    atomic.AddInt64(&m.ItemsProcessed, int64(items))
+    atomic.StoreInt64((*int64)(&m.ProcessingTime), int64(duration))
+}
+```
+
+### Real-time Monitoring
+```go
+// Monitor pipeline health
+func monitorPipeline(ctx context.Context, pipeline *Pipeline) {
+    ticker := time.NewTicker(time.Second)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            // Report metrics
+            reportMetrics(pipeline)
+        }
+    }
+}
+```
+
+## Best Practices
+
+1. **Profile First**: Always profile before optimizing
+2. **Measure Impact**: Quantify performance improvements
+3. **Test Realistic Data**: Use realistic data sizes and distributions
+4. **Monitor Memory**: Watch for memory leaks and excessive allocations
+5. **Balance Trade-offs**: Consider memory vs. performance trade-offs
+6. **Iterate**: Optimize incrementally and measure each change
+7. **Document Changes**: Document performance optimizations and their impact
+
+## Common Performance Anti-patterns
+
+1. **Premature Optimization**: Optimizing before profiling
+2. **Ignoring Memory**: Focusing only on CPU performance
+3. **Unbounded Growth**: Not limiting buffer sizes or worker counts
+4. **Blocking Operations**: Performing blocking I/O in hot paths
+5. **Excessive Allocations**: Allocating in tight loops
+6. **Inefficient Data Structures**: Using wrong data structures for the use case
+7. **No Monitoring**: Not tracking performance metrics
+description:
+globs:
+alwaysApply: true
+---

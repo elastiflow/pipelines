@@ -1,0 +1,203 @@
+# Testing Standards
+
+## Coverage Requirements
+- **Minimum Coverage**: 85% for all packages
+- **Critical Paths**: 95%+ for core pipeline logic
+- **New Code**: 90%+ coverage required for new features
+- **Legacy Code**: Maintain or improve existing coverage
+
+## Test Structure
+
+### File Naming
+- Test files: `*_test.go`
+- Benchmark files: `*_benchmark_test.go` or `benchmarks_*.go`
+- Example files: `example_*.go`
+
+### Test Function Naming
+- Unit tests: `TestFunctionName`
+- Integration tests: `TestIntegration_FeatureName`
+- E2E tests: `TestE2E_ScenarioName`
+- Benchmarks: `BenchmarkFunctionName`
+
+## Unit Testing
+
+### Test Organization
+```go
+func TestFunctionName(t *testing.T) {
+    // Arrange
+    input := "test data"
+    expected := "expected result"
+    
+    // Act
+    result, err := FunctionName(input)
+    
+    // Assert
+    require.NoError(t, err)
+    assert.Equal(t, expected, result)
+}
+```
+
+### Table-Driven Tests
+```go
+func TestFunctionName_TableDriven(t *testing.T) {
+    tests := []struct {
+        name     string
+        input    string
+        expected string
+        wantErr  bool
+    }{
+        {"valid input", "test", "result", false},
+        {"empty input", "", "", true},
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result, err := FunctionName(tt.input)
+            if tt.wantErr {
+                assert.Error(t, err)
+            } else {
+                assert.NoError(t, err)
+                assert.Equal(t, tt.expected, result)
+            }
+        })
+    }
+}
+```
+
+### Mocking and Dependencies
+- Use interfaces for external dependencies
+- Create mock implementations for testing
+- Use `testify/mock` for complex mocking scenarios
+- Test error conditions by mocking failures
+
+## Integration Testing
+
+### Pipeline Testing
+```go
+func TestIntegration_PipelineFlow(t *testing.T) {
+    // Setup context and error channel
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    
+    errChan := make(chan error, 10)
+    defer close(errChan)
+    
+    // Create and run pipeline
+    pipeline := pipelines.New[int, int](ctx, source, errChan)
+    // ... pipeline setup
+    
+    // Verify results
+    // ... assertions
+}
+```
+
+### Error Handling Tests
+- Test pipeline error propagation
+- Verify error channel receives expected errors
+- Test recovery from error conditions
+- Ensure proper cleanup on errors
+
+## Benchmark Testing
+
+### Benchmark Structure
+```go
+func BenchmarkFunctionName(b *testing.B) {
+    // Setup
+    input := generateTestData(1000)
+    
+    b.ResetTimer()
+    b.ReportAllocs()
+    
+    for i := 0; i < b.N; i++ {
+        FunctionName(input)
+    }
+}
+```
+
+### Pipeline Benchmarks
+```go
+func BenchmarkPipeline_Throughput(b *testing.B) {
+    // Setup pipeline with realistic data
+    // Measure items processed per second
+    // Report memory allocations
+    // Test different buffer sizes and worker counts
+}
+```
+
+## Test Utilities
+
+### Test Data Generation
+```go
+func generateTestData(count int) []TestItem {
+    data := make([]TestItem, count)
+    for i := 0; i < count; i++ {
+        data[i] = TestItem{ID: i, Value: fmt.Sprintf("item_%d", i)}
+    }
+    return data
+}
+```
+
+### Assertion Helpers
+- Use `testify/assert` for basic assertions
+- Use `testify/require` for critical assertions that should stop the test
+- Create custom assertion helpers for domain-specific checks
+- Use `assert.Eventually` for asynchronous operations
+
+## Performance Testing
+
+### Memory Profiling
+```go
+func TestMemoryUsage(t *testing.T) {
+    var m runtime.MemStats
+    runtime.ReadMemStats(&m)
+    before := m.Alloc
+    
+    // Run operation
+    
+    runtime.ReadMemStats(&m)
+    after := m.Alloc
+    
+    t.Logf("Memory allocated: %d bytes", after-before)
+}
+```
+
+### Goroutine Leak Detection
+```go
+func TestNoGoroutineLeaks(t *testing.T) {
+    before := runtime.NumGoroutine()
+    
+    // Run operation
+    
+    // Wait for cleanup
+    time.Sleep(100 * time.Millisecond)
+    
+    after := runtime.NumGoroutine()
+    assert.LessOrEqual(t, after, before+1) // Allow for test goroutine
+}
+```
+
+## Test Environment
+
+### CI/CD Integration
+- Run tests with race detection: `go test -race`
+- Enforce coverage thresholds
+- Run benchmarks in CI
+- Use `make test-unit` and `make test-integration`
+
+### Local Development
+- Use `go test -v` for verbose output
+- Use `go test -cover` to check coverage
+- Use `go test -bench=.` to run benchmarks
+- Use `go test -run TestName` to run specific tests
+
+## Best Practices
+
+1. **Fast Tests**: Keep unit tests under 100ms
+2. **Isolated Tests**: Tests should not depend on each other
+3. **Deterministic**: Tests should produce the same results every time
+4. **Readable**: Test names should clearly describe what they test
+5. **Maintainable**: Tests should be easy to update when code changes
+description:
+globs:
+alwaysApply: true
+---

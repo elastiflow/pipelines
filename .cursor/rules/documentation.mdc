@@ -1,0 +1,407 @@
+# Documentation Standards
+
+## Package Documentation
+
+### Package-Level Documentation (`doc.go`)
+```go
+// Package pipelines provides a set of utilities for creating and managing
+// concurrent data processing pipelines in Go.
+//
+// The package includes various functions to create, manipulate, and control
+// the flow of data through channels, allowing for flexible and efficient
+// data processing.
+//
+// The main components of this package are:
+// - Pipeline: A struct that defines a generic connection of data streams.
+// - DataStream (in subpackage "datastreams"): Provides the methods to build concurrency stages.
+//
+// Pipelines work by connecting a "Source" (an upstream data producer) with an
+// optional chain of transformations or filters before optionally "Sinking" (sending
+// the output to a consumer). Under the hood, all data flows through Go channels
+// with concurrency managed by goroutines. Each transformation or filter is
+// effectively run in parallel, communicating via channels.
+//
+// For more in-depth usage, see the examples below and the doc.go file.
+package pipelines
+```
+
+### Function Documentation
+```go
+// New constructs a new Pipeline of a given type by passing in a datastreams.Sourcer.
+//
+// Parameters:
+//   - ctx: a context.Context used to cancel or manage the lifetime of the pipeline
+//   - sourcer: a datastreams.Sourcer[T] that provides the initial data stream
+//   - errStream: an error channel to which the pipeline can send errors
+//
+// Returns:
+//   - *Pipeline[T, U]: a new pipeline instance
+//
+// Example usage:
+//
+//	p := pipelines.New[int, int](context.Background(), someSource, errChan)
+func New[T any, U any](
+    ctx context.Context,
+    sourcer datastreams.Sourcer[T],
+    errStream chan error,
+) *Pipeline[T, U] {
+    // Implementation
+}
+```
+
+## README Documentation
+
+### Project Overview
+```markdown
+# Pipelines
+
+[![Go checks](https://github.com/elastiflow/pipelines/actions/workflows/go_checks.yml/badge.svg)](https://github.com/elastiflow/pipelines/actions/workflows/go_checks.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/elastiflow/pipelines.svg)](https://pkg.go.dev/github.com/elastiflow/pipelines)
+
+The `pipelines` module is a Go library designed to facilitate the creation and management of:
+
+1. Data processing pipelines
+2. Reactive streaming applications leveraging Go's concurrency primitives
+
+It provides a set of tools for **flow control**, **error handling**, and **pipeline processes**.
+Under the hood, it uses Go's channels and goroutines to enable concurrency at each stage of the pipeline.
+```
+
+### Installation and Setup
+```markdown
+## Setup
+
+To get started with the `pipelines` module, follow these steps:
+
+1. Install the `pipelines` module:
+
+    ```sh
+    go get github.com/elastiflow/pipelines
+    ```
+
+2. (Optional) To view local documentation via `godoc`:
+    ```sh
+    go install -v golang.org/x/tools/cmd/godoc@latest
+    make docs
+    ```
+   
+3. Once running, visit [GoDocs](http://localhost:6060/pkg/github.com/elastiflow/pipelines/) to view the 
+latest documentation locally.
+```
+
+### Usage Examples
+```markdown
+## Examples
+
+Below is an example of how to use the `pipelines` module to create simple pipelines.
+Additional examples can be found in the godocs.
+
+### Squaring Numbers
+
+This example demonstrates how to set up a pipeline that takes a stream of integers, squares each odd integer, and outputs the results.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log/slog"
+
+    "github.com/elastiflow/pipelines"
+    "github.com/elastiflow/pipelines/datastreams"
+    "github.com/elastiflow/pipelines/datastreams/sources"
+)
+
+func createIntArr(num int) []int {
+    var arr []int
+    for i := 0; i < num; i++ {
+        arr = append(arr, i)
+    }
+    return arr
+}
+
+func squareOdds(v int) (int, error) {
+    if v%2 == 0 {
+        return v, fmt.Errorf("even number error: %v", v)
+    }
+    return v * v, nil
+}
+
+func exProcess(p datastreams.DataStream[int]) datastreams.DataStream[int] {
+    return p.OrDone().FanOut(
+        datastreams.Params{Num: 2},
+    ).Run(
+        squareOdds,
+    )
+}
+
+func main() {
+    errChan := make(chan error, 10)
+    defer close(errChan)
+
+    pl := pipelines.New[int, int]( // Create a new Pipeline
+        context.Background(),
+        sources.FromArray(createIntArr(10)), // Create a source to start the pipeline
+        errChan,
+    ).Start(exProcess)
+
+    go func(errReceiver <-chan error) { // Handle Pipeline errors
+        defer pl.Close()
+        for err := range errReceiver {
+            if err != nil {
+                slog.Error("demo error: " + err.Error())
+                // return if you wanted to close the pipeline during error handling.
+            }
+        }
+    }(pl.Errors())
+    
+    for out := range pl.Out() { // Read Pipeline output
+        slog.Info("received simple pipeline output", slog.Int("out", out))
+    }
+}
+```
+```
+
+## API Documentation
+
+### Type Documentation
+```go
+// Pipeline is a struct that defines a generic stream process.
+//
+// Pipeline[T, U] represents a flow of data type T at the input,
+// ultimately producing data of type U at the output. Under the hood,
+// a Pipeline orchestrates DataStream stages connected by channels.
+//
+// Usage typically begins by calling New(...) to create a pipeline with a Source,
+// and then applying transformations via Map, Process, or Start/Stream with a StreamFunc.
+// Finally, you can read from the Out() channel, or Sink the output via a Sinker.
+type Pipeline[T any, U any] struct {
+    sourceDS   datastreams.DataStream[T]
+    sinkDS     datastreams.DataStream[U]
+    ctx        context.Context
+    cancelFunc context.CancelFunc
+    errorChan  chan error
+    wg         *sync.WaitGroup
+}
+```
+
+### Method Documentation
+```go
+// Start begins processing the pipeline using the provided StreamFunc.
+//
+// The StreamFunc is applied to the pipeline's source DataStream, allowing
+// you to define the processing logic for each stage. The pipeline will
+// start processing data immediately and continue until the source is exhausted
+// or the context is cancelled.
+//
+// Parameters:
+//   - streamFunc: function that defines the processing logic for the pipeline
+//
+// Returns:
+//   - *Pipeline[T, U]: the pipeline instance for method chaining
+//
+// Example:
+//
+//	pipeline := pipelines.New[int, int](ctx, source, errChan)
+//	result := pipeline.Start(func(ds datastreams.DataStream[int]) datastreams.DataStream[int] {
+//	    return ds.Filter(isEven).Map(square)
+//	})
+func (p *Pipeline[T, U]) Start(streamFunc StreamFunc[T, U]) *Pipeline[T, U] {
+    // Implementation
+}
+```
+
+## Example Documentation
+
+### Example Functions
+```go
+// ExampleBatchSinker demonstrates how to use the BatchSinker for efficient
+// batch processing of pipeline data.
+//
+// This example shows:
+// 1. Setting up a pipeline with batch processing
+// 2. Configuring the BatchSinker with appropriate batch size
+// 3. Handling batch flush operations
+// 4. Managing concurrent processing with multiple workers
+func ExampleBatchSinker() {
+    log.Println("Starting complex batch processing example...")
+
+    const (
+        numItemsToProcess = 10_000
+        batchSize         = 1_000
+        numWorkers        = 8 // Number of parallel workers for processing.
+    )
+
+    // Setup context and error handling
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+    errs := make(chan error, 1)
+    
+    // ... rest of example implementation
+}
+```
+
+### Example Output
+```go
+// Output:
+// Starting complex batch processing example...
+// ⚡️ Flushing batch of 1000 items (e.g., IDs 1 to 1000)...
+// ⚡️ Flushing batch of 1000 items (e.g., IDs 1001 to 2000)...
+// ...
+// ✅ BatchSinker example finished successfully.
+```
+
+## Contributing Documentation
+
+### CONTRIBUTING.md Structure
+```markdown
+# Contributing to Pipelines
+
+Thank you for your interest in contributing to **Pipelines**! We welcome and appreciate contributions from the community. This document will guide you through the steps and best practices to make your contributions as smooth as possible.
+
+## Table of Contents
+
+1. [Prerequisites](#prerequisites)
+2. [Getting the Source](#getting-the-source)
+3. [Project Structure](#project-structure)
+4. [Development Workflow](#development-workflow)
+5. [Coding Guidelines](#coding-guidelines)
+6. [Testing and Coverage](#testing-and-coverage)
+7. [Documentation](#documentation)
+8. [Submitting Changes](#submitting-changes)
+9. [Reporting Issues](#reporting-issues)
+10. [Code of Conduct](#code-of-conduct)
+11. [License](#license)
+
+## Prerequisites
+
+- Latest stable version of Go installed on your system.
+- A GitHub account to [submit issues](https://github.com/elastiflow/pipelines/issues) or [create pull requests](https://github.com/elastiflow/pipelines/pulls).
+
+## Getting the Source
+
+1. [Fork](https://docs.github.com/en/get-started/quickstart/fork-a-repo) this repository into your personal GitHub account.
+2. Clone your fork locally:
+
+   ```bash
+   git clone https://github.com/<your-username>/pipelines
+   cd pipelines
+   ```
+
+3. Add the main repo as a remote, so you can keep it updated:
+
+   ```bash
+   git remote add upstream https://github.com/elastiflow/pipelines.git
+   ```
+
+4. Always work on a branch (not `main`). Keep `main` in sync with upstream:
+
+   ```bash
+   git checkout main
+   git pull upstream main
+   git checkout -b feature/my-new-feature
+   ```
+
+## Development Workflow
+
+1. **Create or update your local branch** off the latest `main`.
+2. Make changes to code or documentation.
+3. **Lint and format** your code:
+   ```bash
+   go fmt ./...
+   go vet ./...
+   ```
+4. **Run tests** to ensure nothing is broken:
+   ```bash
+   go test ./... -v
+   ```
+5. **Check coverage** (we aim for 85%+ coverage):
+   ```bash
+   go test ./... -cover
+   ```
+6. Commit your changes with a clear commit message:
+   ```bash
+   git commit -m "Add new feature X with unit tests"
+   ```
+7. Push your branch to GitHub:
+   ```bash
+   git push origin feature/my-new-feature
+   ```
+
+## Coding Guidelines
+
+- Follow Go idioms and best practices as outlined in [Effective Go](https://golang.org/doc/effective_go.html)
+- Use `gofmt` for consistent formatting
+- Write clear, descriptive commit messages
+- Include tests for new functionality
+- Update documentation as needed
+
+## Testing and Coverage
+
+- Aim for 85%+ test coverage
+- Use table-driven tests for multiple test cases
+- Test edge cases and error conditions
+- Include integration tests for complex functionality
+
+## Documentation
+
+- Update README.md for new features
+- Include usage examples
+- Document breaking changes
+- Keep examples up to date
+
+## Submitting Changes
+
+1. Ensure your code compiles and all tests pass
+2. Update documentation as needed
+3. Create a pull request with a clear description
+4. Request review from maintainers
+5. Address feedback promptly
+
+## Reporting Issues
+
+- Use the issue template
+- Provide clear reproduction steps
+- Include relevant error messages
+- Specify your Go version and environment
+
+## Code of Conduct
+
+This project adheres to the Contributor Covenant code of conduct. By participating, you are expected to uphold this code.
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.
+```
+
+## Documentation Best Practices
+
+### Writing Style
+1. **Be Clear and Concise**: Use simple, direct language
+2. **Provide Examples**: Include practical examples for all concepts
+3. **Explain Why**: Don't just describe what, explain why
+4. **Use Consistent Formatting**: Follow established patterns
+5. **Keep Updated**: Maintain documentation with code changes
+
+### Content Organization
+1. **Logical Flow**: Organize content from basic to advanced
+2. **Cross-References**: Link related concepts and examples
+3. **Table of Contents**: Provide navigation for long documents
+4. **Search-Friendly**: Use descriptive headings and keywords
+
+### Code Examples
+1. **Complete Examples**: Provide runnable, complete examples
+2. **Real-World Scenarios**: Use realistic use cases
+3. **Error Handling**: Show proper error handling patterns
+4. **Best Practices**: Demonstrate recommended approaches
+
+### Maintenance
+1. **Regular Reviews**: Periodically review and update documentation
+2. **Version Tracking**: Document breaking changes and new features
+3. **User Feedback**: Incorporate user questions and feedback
+4. **Automated Checks**: Use tools to verify documentation accuracy
+description:
+globs:
+alwaysApply: true
+---

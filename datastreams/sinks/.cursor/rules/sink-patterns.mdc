@@ -1,0 +1,352 @@
+# Sink Implementation Patterns
+
+## Core Sink Interface
+
+### Sinker Contract
+```go
+type Sinker[T any] interface {
+    Sink(ctx context.Context, ds datastreams.DataStream[T]) error
+}
+```
+
+### Basic Sink Implementation
+```go
+type BasicSink[T any] struct {
+    processor func(T) error
+}
+
+func (s *BasicSink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    for item := range ds.Out() {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        default:
+            if err := s.processor(item); err != nil {
+                return err
+            }
+        }
+    }
+    return nil
+}
+```
+
+## Built-in Sink Types
+
+### ToChannel Sink
+```go
+// Write DataStream output to a channel
+outputChan := make(chan Result, 1000)
+ds = ds.Sink(sinks.ToChannel(outputChan))
+
+// Use with buffered channels for better performance
+outputChan := make(chan Result, 10000)
+ds = ds.Sink(sinks.ToChannel(outputChan))
+```
+
+### BatchSinker
+```go
+// Process items in batches for efficiency
+onFlush := func(ctx context.Context, batch []Data) error {
+    // Process batch (e.g., bulk database insert)
+    return processBatch(batch)
+}
+
+batchSink := sinks.NewBatchSinker(onFlush, batchSize, errChan)
+ds = ds.Sink(batchSink)
+
+// Configure batch size based on use case
+const (
+    smallBatch  = 100   // For real-time processing
+    mediumBatch = 1000  // For balanced performance
+    largeBatch  = 10000 // For maximum throughput
+)
+```
+
+### EventSinker
+```go
+// Process individual events
+onEvent := func(ctx context.Context, event Data) error {
+    // Process single event
+    return processEvent(event)
+}
+
+eventSink := sinks.NewEventSinker(onEvent, errChan)
+ds = ds.Sink(eventSink)
+```
+
+## Custom Sink Implementations
+
+### Database Sink
+```go
+type DatabaseSink[T any] struct {
+    db        *sql.DB
+    tableName string
+    batchSize int
+}
+
+func (s *DatabaseSink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    batch := make([]T, 0, s.batchSize)
+    
+    for item := range ds.Out() {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        default:
+            batch = append(batch, item)
+            
+            if len(batch) >= s.batchSize {
+                if err := s.flushBatch(ctx, batch); err != nil {
+                    return err
+                }
+                batch = batch[:0] // Reset slice
+            }
+        }
+    }
+    
+    // Flush remaining items
+    if len(batch) > 0 {
+        return s.flushBatch(ctx, batch)
+    }
+    
+    return nil
+}
+
+func (s *DatabaseSink[T]) flushBatch(ctx context.Context, batch []T) error {
+    // Implement batch database insert
+    return nil
+}
+```
+
+### File Sink
+```go
+type FileSink[T any] struct {
+    filePath  string
+    encoder   func(T) ([]byte, error)
+    batchSize int
+}
+
+func (s *FileSink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    file, err := os.Create(s.filePath)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    batch := make([]T, 0, s.batchSize)
+    
+    for item := range ds.Out() {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        default:
+            batch = append(batch, item)
+            
+            if len(batch) >= s.batchSize {
+                if err := s.flushBatch(file, batch); err != nil {
+                    return err
+                }
+                batch = batch[:0]
+            }
+        }
+    }
+    
+    // Flush remaining items
+    if len(batch) > 0 {
+        return s.flushBatch(file, batch)
+    }
+    
+    return nil
+}
+```
+
+### HTTP Sink
+```go
+type HTTPSink[T any] struct {
+    client    *http.Client
+    endpoint  string
+    encoder   func(T) ([]byte, error)
+    batchSize int
+}
+
+func (s *HTTPSink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    batch := make([]T, 0, s.batchSize)
+    
+    for item := range ds.Out() {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        default:
+            batch = append(batch, item)
+            
+            if len(batch) >= s.batchSize {
+                if err := s.sendBatch(ctx, batch); err != nil {
+                    return err
+                }
+                batch = batch[:0]
+            }
+        }
+    }
+    
+    // Send remaining items
+    if len(batch) > 0 {
+        return s.sendBatch(ctx, batch)
+    }
+    
+    return nil
+}
+```
+
+## Error Handling Patterns
+
+### Graceful Degradation
+```go
+func (s *Sink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    var errors []error
+    
+    for item := range ds.Out() {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        default:
+            if err := s.processItem(item); err != nil {
+                // Collect errors but continue processing
+                errors = append(errors, err)
+                
+                // Log error for monitoring
+                log.Printf("Error processing item %v: %v", item, err)
+                
+                // Optionally implement retry logic
+                if retryErr := s.retryItem(item); retryErr != nil {
+                    log.Printf("Retry failed for item %v: %v", item, retryErr)
+                }
+            }
+        }
+    }
+    
+    // Return combined errors if any occurred
+    if len(errors) > 0 {
+        return fmt.Errorf("encountered %d errors during processing", len(errors))
+    }
+    
+    return nil
+}
+```
+
+### Circuit Breaker Pattern
+```go
+type CircuitBreakerSink[T any] struct {
+    sink          Sinker[T]
+    failureCount  int
+    threshold     int
+    timeout       time.Duration
+    lastFailure   time.Time
+    mu            sync.RWMutex
+}
+
+func (s *CircuitBreakerSink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    if s.isOpen() {
+        return fmt.Errorf("circuit breaker is open")
+    }
+    
+    err := s.sink.Sink(ctx, ds)
+    if err != nil {
+        s.recordFailure()
+    } else {
+        s.recordSuccess()
+    }
+    
+    return err
+}
+```
+
+## Performance Optimization
+
+### Buffer Management
+```go
+// Use appropriate buffer sizes
+const (
+    smallBuffer  = 100   // For low-throughput scenarios
+    mediumBuffer = 1000  // For balanced scenarios
+    largeBuffer  = 10000 // For high-throughput scenarios
+)
+
+// Configure based on expected throughput
+bufferSize := expectedThroughput * processingTime
+sink := NewOptimizedSink(bufferSize)
+```
+
+### Connection Pooling
+```go
+type PooledSink[T any] struct {
+    pool    *sync.Pool
+    factory func() Sinker[T]
+}
+
+func (s *PooledSink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    sink := s.pool.Get().(Sinker[T])
+    defer s.pool.Put(sink)
+    
+    return sink.Sink(ctx, ds)
+}
+```
+
+## Testing Sinks
+
+### Unit Test Sink
+```go
+type TestSink[T any] struct {
+    items []T
+    mu    sync.RWMutex
+}
+
+func (s *TestSink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    for item := range ds.Out() {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        default:
+            s.mu.Lock()
+            s.items = append(s.items, item)
+            s.mu.Unlock()
+        }
+    }
+    return nil
+}
+
+func (s *TestSink[T]) GetItems() []T {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+    return append([]T{}, s.items...)
+}
+```
+
+### Mock Sink
+```go
+type MockSink[T any] struct {
+    mock.Mock
+}
+
+func (s *MockSink[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    args := s.Called(ctx, ds)
+    return args.Error(0)
+}
+
+// In tests
+mockSink := &MockSink[Data]{}
+mockSink.On("Sink", mock.Anything, mock.Anything).Return(nil)
+```
+
+## Best Practices
+
+1. **Handle Context Cancellation**: Always check `ctx.Done()` in sink loops
+2. **Implement Batching**: Use batch processing for better performance
+3. **Error Handling**: Provide meaningful error messages and context
+4. **Resource Cleanup**: Use `defer` for proper cleanup
+5. **Buffer Sizing**: Choose appropriate buffer sizes based on throughput
+6. **Monitoring**: Log errors and performance metrics
+7. **Testing**: Create testable sink implementations
+8. **Circuit Breakers**: Implement circuit breakers for external dependencies
+description:
+globs:
+alwaysApply: true
+---

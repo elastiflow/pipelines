@@ -1,0 +1,485 @@
+# Windowing Implementation Patterns
+
+## Core Windowing Concepts
+
+### Window Types Overview
+```go
+// Three main window types supported
+type WindowType int
+
+const (
+    TumblingWindow WindowType = iota  // Fixed-size, non-overlapping
+    SlidingWindow                      // Overlapping windows
+    IntervalWindow                     // Time-based windows
+)
+```
+
+### Partition Interface
+```go
+// Partition represents a single, active partition for a specific key
+type Partition[T any, K comparable] interface {
+    // Push sends a new element into the partition for processing
+    Push(item TimedKeyableElement[T, K])
+}
+
+// Partitioner acts as a factory for creating new partitions
+type Partitioner[T any, K comparable] interface {
+    // Create initializes and starts a new, active Partition instance
+    Create(ctx context.Context, out chan<- []T) Partition[T, K]
+    Closeable
+}
+```
+
+## Window Factory Implementations
+
+### Tumbling Window Factory
+```go
+type TumblingWindowFactory[T any] struct {
+    config TumblingWindowConfig
+}
+
+type TumblingWindowConfig struct {
+    Size int // Number of items per window
+}
+
+func NewTumblingFactory[T any](config TumblingWindowConfig) *TumblingWindowFactory[T] {
+    return &TumblingWindowFactory[T]{
+        config: config,
+    }
+}
+
+func (f *TumblingWindowFactory[T]) Create(ctx context.Context, out chan<- []T) Partition[T, any] {
+    partition := &TumblingPartition[T]{
+        config: f.config,
+        out:    out,
+        items:  make([]T, 0, f.config.Size),
+    }
+    
+    go partition.run(ctx)
+    return partition
+}
+```
+
+### Sliding Window Factory
+```go
+type SlidingWindowFactory[T any] struct {
+    config SlidingWindowConfig
+}
+
+type SlidingWindowConfig struct {
+    Size    int // Window size in items
+    Advance int // How many items to advance by
+}
+
+func NewSlidingFactory[T any](config SlidingWindowConfig) *SlidingWindowFactory[T] {
+    return &SlidingWindowFactory[T]{
+        config: config,
+    }
+}
+
+func (f *SlidingWindowFactory[T]) Create(ctx context.Context, out chan<- []T) Partition[T, any] {
+    partition := &SlidingPartition[T]{
+        config: f.config,
+        out:    out,
+        items:  make([]T, 0, f.config.Size),
+    }
+    
+    go partition.run(ctx)
+    return partition
+}
+```
+
+### Interval Window Factory
+```go
+type IntervalWindowFactory[T any] struct {
+    config IntervalWindowConfig
+}
+
+type IntervalWindowConfig struct {
+    Duration           time.Duration
+    WatermarkGenerator WatermarkGenerator[T]
+}
+
+func NewIntervalFactory[T any](config IntervalWindowConfig) *IntervalWindowFactory[T] {
+    return &IntervalWindowFactory[T]{
+        config: config,
+    }
+}
+
+func (f *IntervalWindowFactory[T]) Create(ctx context.Context, out chan<- []T) Partition[T, any] {
+    partition := &IntervalPartition[T]{
+        config: f.config,
+        out:    out,
+        items:  make([]T, 0, 1000), // Pre-allocate reasonable capacity
+    }
+    
+    go partition.run(ctx)
+    return partition
+}
+```
+
+## Partition Implementations
+
+### Tumbling Partition
+```go
+type TumblingPartition[T any] struct {
+    config TumblingWindowConfig
+    out    chan<- []T
+    items  []T
+    mu     sync.Mutex
+}
+
+func (p *TumblingPartition[T]) Push(item TimedKeyableElement[T, any]) {
+    p.mu.Lock()
+    defer p.mu.Unlock()
+    
+    p.items = append(p.items, item.Value())
+    
+    // Emit window when full
+    if len(p.items) >= p.config.Size {
+        p.emitWindow()
+    }
+}
+
+func (p *TumblingPartition[T]) emitWindow() {
+    if len(p.items) > 0 {
+        // Send copy of items to avoid race conditions
+        window := make([]T, len(p.items))
+        copy(window, p.items)
+        
+        select {
+        case p.out <- window:
+            // Reset items for next window
+            p.items = p.items[:0]
+        default:
+            // Channel is full, log warning
+            log.Printf("Warning: output channel is full, dropping window")
+        }
+    }
+}
+
+func (p *TumblingPartition[T]) run(ctx context.Context) {
+    ticker := time.NewTicker(100 * time.Millisecond)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ctx.Done():
+            // Emit final window before closing
+            p.emitWindow()
+            return
+        case <-ticker.C:
+            // Periodic cleanup and window emission
+            p.emitWindow()
+        }
+    }
+}
+```
+
+### Sliding Partition
+```go
+type SlidingPartition[T any] struct {
+    config SlidingWindowConfig
+    out    chan<- []T
+    items  []T
+    mu     sync.Mutex
+}
+
+func (p *SlidingPartition[T]) Push(item TimedKeyableElement[T, any]) {
+    p.mu.Lock()
+    defer p.mu.Unlock()
+    
+    p.items = append(p.items, item.Value())
+    
+    // Emit window when we have enough items
+    if len(p.items) >= p.config.Size {
+        p.emitWindow()
+        // Advance by removing items
+        p.items = p.items[p.config.Advance:]
+    }
+}
+
+func (p *SlidingPartition[T]) emitWindow() {
+    if len(p.items) >= p.config.Size {
+        window := make([]T, p.config.Size)
+        copy(window, p.items[:p.config.Size])
+        
+        select {
+        case p.out <- window:
+            // Successfully emitted window
+        default:
+            log.Printf("Warning: output channel is full, dropping sliding window")
+        }
+    }
+}
+```
+
+### Interval Partition
+```go
+type IntervalPartition[T any] struct {
+    config IntervalWindowConfig
+    out    chan<- []T
+    items  []T
+    mu     sync.Mutex
+    timer  *time.Timer
+}
+
+func (p *IntervalPartition[T]) Push(item TimedKeyableElement[T, any]) {
+    p.mu.Lock()
+    defer p.mu.Unlock()
+    
+    p.items = append(p.items, item.Value())
+    
+    // Start timer for first item
+    if p.timer == nil {
+        p.timer = time.AfterFunc(p.config.Duration, func() {
+            p.emitWindow()
+        })
+    }
+}
+
+func (p *IntervalPartition[T]) emitWindow() {
+    p.mu.Lock()
+    defer p.mu.Unlock()
+    
+    if len(p.items) > 0 {
+        window := make([]T, len(p.items))
+        copy(window, p.items)
+        
+        select {
+        case p.out <- window:
+            // Reset items and timer
+            p.items = p.items[:0]
+            p.timer = time.AfterFunc(p.config.Duration, func() {
+                p.emitWindow()
+            })
+        default:
+            log.Printf("Warning: output channel is full, dropping interval window")
+        }
+    }
+}
+```
+
+## Watermark Management
+
+### Watermark Generator Implementation
+```go
+type WatermarkGenerator[T any] interface {
+    OnEvent(event T, eventTime time.Time)
+    GetWatermark() time.Time
+}
+
+type SimpleWatermarkGenerator[T any] struct {
+    maxEventTime time.Time
+    allowedLatency time.Duration
+    mu            sync.RWMutex
+}
+
+func (w *SimpleWatermarkGenerator[T]) OnEvent(event T, eventTime time.Time) {
+    w.mu.Lock()
+    defer w.mu.Unlock()
+    
+    if eventTime.After(w.maxEventTime) {
+        w.maxEventTime = eventTime
+    }
+}
+
+func (w *SimpleWatermarkGenerator[T]) GetWatermark() time.Time {
+    w.mu.RLock()
+    defer w.mu.RUnlock()
+    
+    return w.maxEventTime.Add(-w.allowedLatency)
+}
+```
+
+### Late Event Handling
+```go
+type LateEventHandler[T any] struct {
+    watermarkGenerator WatermarkGenerator[T]
+    lateEventStream   chan<- T
+}
+
+func (h *LateEventHandler[T]) HandleEvent(event T, eventTime time.Time) bool {
+    watermark := h.watermarkGenerator.GetWatermark()
+    
+    if eventTime.Before(watermark) {
+        // Event is late, send to late event stream
+        select {
+        case h.lateEventStream <- event:
+            return true // Successfully handled late event
+        default:
+            log.Printf("Warning: late event stream is full, dropping late event")
+            return false
+        }
+    }
+    
+    return true // Event is on time
+}
+```
+
+## Performance Optimization
+
+### Object Pooling for Windows
+```go
+var windowPool = sync.Pool{
+    New: func() interface{} {
+        return &WindowData{
+            Items: make([]T, 0, 1000),
+        }
+    },
+}
+
+func getWindowFromPool() *WindowData {
+    return windowPool.Get().(*WindowData)
+}
+
+func returnWindowToPool(window *WindowData) {
+    // Reset items for reuse
+    window.Items = window.Items[:0]
+    windowPool.Put(window)
+}
+```
+
+### Efficient Window Emission
+```go
+func (p *Partition[T]) emitWindowOptimized() {
+    if len(p.items) == 0 {
+        return
+    }
+    
+    // Get window from pool
+    window := getWindowFromPool()
+    defer returnWindowToPool(window)
+    
+    // Copy items efficiently
+    window.Items = append(window.Items, p.items...)
+    
+    // Send window
+    select {
+    case p.out <- window.Items:
+        // Successfully emitted
+    default:
+        log.Printf("Warning: output channel is full")
+    }
+}
+```
+
+## Error Handling and Recovery
+
+### Graceful Degradation
+```go
+func (p *Partition[T]) PushWithRecovery(item TimedKeyableElement[T, any]) {
+    defer func() {
+        if r := recover(); r != nil {
+            log.Printf("Recovered from panic in partition: %v", r)
+            // Continue processing other items
+        }
+    }()
+    
+    p.Push(item)
+}
+```
+
+### Circuit Breaker for Output
+```go
+type CircuitBreakerPartition[T any] struct {
+    partition       Partition[T, any]
+    failureCount    int
+    threshold       int
+    timeout         time.Duration
+    lastFailure     time.Time
+    mu              sync.RWMutex
+}
+
+func (p *CircuitBreakerPartition[T]) Push(item TimedKeyableElement[T, any]) {
+    if p.isOpen() {
+        log.Printf("Circuit breaker is open, dropping item")
+        return
+    }
+    
+    if err := p.partition.Push(item); err != nil {
+        p.recordFailure()
+    } else {
+        p.recordSuccess()
+    }
+}
+```
+
+## Testing Windowing
+
+### Test Partition Implementation
+```go
+type TestPartition[T any] struct {
+    items []T
+    out   chan<- []T
+    mu    sync.RWMutex
+}
+
+func (p *TestPartition[T]) Push(item TimedKeyableElement[T, any]) {
+    p.mu.Lock()
+    defer p.mu.Unlock()
+    
+    p.items = append(p.items, item.Value())
+}
+
+func (p *TestPartition[T]) GetItems() []T {
+    p.mu.RLock()
+    defer p.mu.RUnlock()
+    
+    return append([]T{}, p.items...)
+}
+
+func (p *TestPartition[T]) EmitWindow() {
+    p.mu.Lock()
+    defer p.mu.Unlock()
+    
+    if len(p.items) > 0 {
+        window := make([]T, len(p.items))
+        copy(window, p.items)
+        
+        select {
+        case p.out <- window:
+            p.items = p.items[:0]
+        default:
+            // Channel is full
+        }
+    }
+}
+```
+
+### Benchmark Partition
+```go
+func BenchmarkPartition_Push(b *testing.B) {
+    partition := &TumblingPartition[int]{
+        config: TumblingWindowConfig{Size: 1000},
+        out:    make(chan []int, 100),
+        items:  make([]int, 0, 1000),
+    }
+    
+    b.ResetTimer()
+    b.ReportAllocs()
+    
+    for i := 0; i < b.N; i++ {
+        item := TimedKeyableElement[int, any]{
+            value: i,
+            time:  time.Now(),
+        }
+        partition.Push(item)
+    }
+}
+```
+
+## Best Practices
+
+1. **Thread Safety**: Always use proper synchronization for shared state
+2. **Memory Management**: Use object pools for frequently allocated windows
+3. **Error Handling**: Implement graceful degradation and recovery
+4. **Performance**: Profile and optimize window emission logic
+5. **Monitoring**: Log performance metrics and error conditions
+6. **Testing**: Create comprehensive tests for partition behavior
+7. **Resource Cleanup**: Ensure proper cleanup of timers and goroutines
+8. **Backpressure**: Handle output channel backpressure gracefully
+description:
+globs:
+alwaysApply: true
+---

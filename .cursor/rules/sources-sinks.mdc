@@ -1,0 +1,214 @@
+# Sources and Sinks
+
+## Data Sources
+
+### Source Interface
+```go
+type Sourcer[T any] interface {
+    Source(ctx context.Context, errStream chan<- error) DataStream[T]
+}
+```
+
+### Built-in Sources
+
+#### FromArray
+```go
+// Convert slice to source
+source := sources.FromArray([]int{1, 2, 3, 4, 5})
+pipeline := pipelines.New[int, int](ctx, source, errChan)
+```
+
+#### FromChannel
+```go
+// Convert existing channel to source
+inputChan := make(chan int, 100)
+source := sources.FromChannel(inputChan)
+```
+
+#### FromDataStream
+```go
+// Convert DataStream to source
+ds := datastreams.New(ctx, inputChan, errChan)
+source := sources.FromDataStream(ds)
+```
+
+### Custom Sources
+```go
+type CustomSourcer[T any] struct {
+    data []T
+}
+
+func (cs *CustomSourcer[T]) Source(ctx context.Context, errStream chan<- error) datastreams.DataStream[T] {
+    outChan := make(chan T, len(cs.data))
+    
+    go func() {
+        defer close(outChan)
+        for _, item := range cs.data {
+            select {
+            case <-ctx.Done():
+                return
+            case outChan <- item:
+            }
+        }
+    }()
+    
+    return datastreams.New(ctx, outChan, errStream)
+}
+```
+
+## Data Sinks
+
+### Sink Interface
+```go
+type Sinker[T any] interface {
+    Sink(ctx context.Context, ds datastreams.DataStream[T]) error
+}
+```
+
+### Built-in Sinks
+
+#### ToChannel
+```go
+// Write to channel
+outputChan := make(chan int, 100)
+ds = ds.Sink(sinks.ToChannel(outputChan))
+```
+
+#### BatchSinker
+```go
+// Process in batches
+onFlush := func(ctx context.Context, batch []T) error {
+    // Process batch
+    return nil
+}
+
+batchSink := sinks.NewBatchSinker(onFlush, batchSize, errChan)
+ds = ds.Sink(batchSink)
+```
+
+#### EventSinker
+```go
+// Process individual events
+onEvent := func(ctx context.Context, event T) error {
+    // Process single event
+    return nil
+}
+
+eventSink := sinks.NewEventSinker(onEvent, errChan)
+ds = ds.Sink(eventSink)
+```
+
+### Custom Sinks
+```go
+type CustomSinker[T any] struct {
+    processor func(T) error
+}
+
+func (cs *CustomSinker[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
+    for item := range ds.Out() {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        default:
+            if err := cs.processor(item); err != nil {
+                return err
+            }
+        }
+    }
+    return nil
+}
+```
+
+## Source-Sink Patterns
+
+### Producer-Consumer
+```go
+// Producer
+source := sources.FromArray(generateData())
+pipeline := pipelines.New[Data, Result](ctx, source, errChan)
+
+// Consumer
+pipeline.Start(processingFunc).Sink(resultSink)
+```
+
+### Multiple Consumers
+```go
+source := sources.FromArray(data)
+
+// Broadcast to multiple consumers
+ds := datastreams.New(ctx, source.Source(ctx, errChan), errChan)
+ds = ds.Broadcast(Params{Num: 3})
+
+// Each consumer gets its own sink
+consumer1 := ds.Sink(sink1)
+consumer2 := ds.Sink(sink2)
+consumer3 := ds.Sink(sink3)
+```
+
+### Pipeline with Sink
+```go
+pipeline := pipelines.New[Input, Output](ctx, source, errChan)
+pipeline.Start(processingFunc).Sink(outputSink)
+```
+
+## Error Handling
+
+### Source Errors
+```go
+// Handle source errors
+errChan := make(chan error, 10)
+go func() {
+    for err := range errChan {
+        log.Printf("Source error: %v", err)
+    }
+}()
+```
+
+### Sink Errors
+```go
+// Handle sink errors
+ds = ds.Sink(sink, Params{
+    SegmentName: "output-sink", // For error context
+})
+```
+
+## Performance Considerations
+
+### Buffer Sizing
+```go
+// Optimize buffer sizes
+source := sources.FromArray(data)
+pipeline := pipelines.New[Data, Result](ctx, source, errChan)
+
+// Use appropriate buffer sizes
+ds := pipeline.Start(func(ds datastreams.DataStream[Data]) datastreams.DataStream[Result] {
+    return ds.Run(processFunc, Params{BufferSize: 1000})
+})
+```
+
+### Batch Processing
+```go
+// Use batch processing for efficiency
+batchSink := sinks.NewBatchSinker(processBatch, 1000, errChan)
+ds = ds.Sink(batchSink)
+```
+
+## Best Practices
+
+1. **Resource Management**: Always close channels and clean up resources
+2. **Error Propagation**: Handle errors at appropriate levels
+3. **Buffer Sizing**: Use appropriate buffer sizes to prevent blocking
+4. **Context Usage**: Use context for cancellation and timeouts
+5. **Testing**: Test sources and sinks independently
+
+## Common Anti-Patterns
+
+1. **Unbounded Channels**: Always set appropriate buffer sizes
+2. **Blocking Operations**: Don't perform blocking I/O in sources/sinks
+3. **Error Swallowing**: Don't ignore errors without proper handling
+4. **Resource Leaks**: Ensure proper cleanup of goroutines and channels
+5. **Synchronous Processing**: Use async processing for better performance
+description:
+globs:
+alwaysApply: true
+---

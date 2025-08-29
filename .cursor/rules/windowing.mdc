@@ -1,0 +1,270 @@
+# Windowing Operations
+
+## Core Concepts
+
+### Window Types
+- **Tumbling Windows**: Fixed-size, non-overlapping windows
+- **Sliding Windows**: Overlapping windows with time-based triggers
+- **Interval Windows**: Time-based windows with custom intervals
+
+### Key Concepts
+- **Watermark**: Time indicator for event time processing
+- **Partition**: Separate processing for different keys
+- **Window Function**: Function applied to windowed data
+
+## Window Factories
+
+### Tumbling Window
+```go
+// Fixed-size, non-overlapping windows
+factory := windower.NewTumblingFactory[Data](
+    windower.TumblingWindowConfig{
+        Size: 100, // Window size in items
+    },
+)
+
+// Use with DataStream
+windowed := ds.Window(
+    factory.Create,
+    factory,
+    Params{BufferSize: 1000},
+)
+```
+
+### Sliding Window
+```go
+// Overlapping windows
+factory := windower.NewSlidingFactory[Data](
+    windower.SlidingWindowConfig{
+        Size:    100,  // Window size in items
+        Advance: 50,   // Advance by 50 items
+    },
+)
+
+// Use with DataStream
+windowed := ds.Window(
+    factory.Create,
+    factory,
+    Params{BufferSize: 1000},
+)
+```
+
+### Interval Window
+```go
+// Time-based windows
+factory := windower.NewIntervalFactory[Data](
+    windower.IntervalWindowConfig{
+        Duration: 5 * time.Second, // Window duration
+    },
+)
+
+// Use with DataStream
+windowed := ds.Window(
+    factory.Create,
+    factory,
+    Params{BufferSize: 1000},
+)
+```
+
+## Keyed Windowing
+
+### Key By Function
+```go
+// Partition data by key before windowing
+keyed := ds.KeyBy[Data, string](
+    func(item Data) string {
+        return item.Category // Extract key
+    },
+    Params{BufferSize: 100},
+)
+
+// Apply windowing to keyed stream
+windowed := keyed.Window(
+    windowFunc,
+    partitionFactory,
+    Params{BufferSize: 1000},
+)
+```
+
+### Window Function
+```go
+// Process windowed data
+windowFunc := func(items []Data) (Result, error) {
+    // Aggregate items in window
+    var sum int
+    for _, item := range items {
+        sum += item.Value
+    }
+    
+    return Result{
+        Count: len(items),
+        Sum:   sum,
+        Avg:   float64(sum) / float64(len(items)),
+    }, nil
+}
+```
+
+## Time-Based Processing
+
+### Watermark Generation
+```go
+type WatermarkGenerator[T any] interface {
+    OnEvent(event T, eventTime time.Time)
+    GetWatermark() time.Time
+}
+
+// Custom watermark generator
+type CustomWatermarkGenerator struct {
+    maxEventTime time.Time
+}
+
+func (w *CustomWatermarkGenerator) OnEvent(event Data, eventTime time.Time) {
+    if eventTime.After(w.maxEventTime) {
+        w.maxEventTime = eventTime
+    }
+}
+
+func (w *CustomWatermarkGenerator) GetWatermark() time.Time {
+    return w.maxEventTime.Add(-5 * time.Second) // Allow 5s late events
+}
+```
+
+### Event Time vs Processing Time
+```go
+// Use event time for windowing
+type TimedEvent struct {
+    Data      Data
+    EventTime time.Time
+}
+
+// Extract event time
+eventTime := event.EventTime
+
+// Use watermark for late event handling
+if eventTime.Before(watermark) {
+    // Handle late event
+    log.Printf("Late event received: %v", event)
+}
+```
+
+## Performance Optimization
+
+### Buffer Sizing
+```go
+// Optimize buffer sizes for windowing
+windowed := ds.Window(
+    windowFunc,
+    factory,
+    Params{
+        BufferSize: 10000, // Large buffer for window accumulation
+    },
+)
+```
+
+### Parallel Processing
+```go
+// Process windows in parallel
+windowed := ds.Window(
+    windowFunc,
+    factory,
+    Params{
+        BufferSize: 1000,
+        Num:        4, // Process 4 windows in parallel
+    },
+)
+```
+
+## Error Handling
+
+### Window Function Errors
+```go
+// Handle errors in window functions
+windowFunc := func(items []Data) (Result, error) {
+    if len(items) == 0 {
+        return Result{}, fmt.Errorf("empty window")
+    }
+    
+    // Process items
+    result, err := processWindow(items)
+    if err != nil {
+        return Result{}, fmt.Errorf("failed to process window: %w", err)
+    }
+    
+    return result, nil
+}
+```
+
+### Late Event Handling
+```go
+// Handle late events gracefully
+if eventTime.Before(watermark) {
+    // Option 1: Drop late events
+    return nil
+    
+    // Option 2: Process in separate late event stream
+    lateEventStream <- event
+    
+    // Option 3: Log and continue
+    log.Printf("Late event dropped: %v", event)
+}
+```
+
+## Testing Windowing
+
+### Unit Tests
+```go
+func TestWindowFunction(t *testing.T) {
+    tests := []struct {
+        name     string
+        input    []Data
+        expected Result
+        wantErr  bool
+    }{
+        {"empty window", []Data{}, Result{}, true},
+        {"single item", []Data{{Value: 10}}, Result{Count: 1, Sum: 10, Avg: 10.0}, false},
+        {"multiple items", []Data{{Value: 1}, {Value: 2}, {Value: 3}}, Result{Count: 3, Sum: 6, Avg: 2.0}, false},
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result, err := windowFunc(tt.input)
+            if tt.wantErr {
+                assert.Error(t, err)
+            } else {
+                assert.NoError(t, err)
+                assert.Equal(t, tt.expected, result)
+            }
+        })
+    }
+}
+```
+
+### Integration Tests
+```go
+func TestIntegration_Windowing(t *testing.T) {
+    // Setup pipeline with windowing
+    source := sources.FromArray(testData)
+    pipeline := pipelines.New[Data, Result](ctx, source, errChan)
+    
+    // Apply windowing
+    result := pipeline.Start(func(ds datastreams.DataStream[Data]) datastreams.DataStream[Result] {
+        keyed := ds.KeyBy[Data, string](keyFunc, Params{})
+        return keyed.Window(windowFunc, factory, Params{})
+    })
+    
+    // Verify results
+    // ... assertions
+}
+```
+
+## Best Practices
+
+1. **Choose Appropriate Window Type**: Use tumbling for fixed batches, sliding for overlapping analysis
+2. **Handle Late Events**: Implement appropriate late event handling strategy
+3. **Optimize Buffer Sizes**: Use appropriate buffer sizes for window accumulation
+4. **Monitor Performance**: Profile window processing performance
+5. **Test Edge Cases**: Test with empty windows, single items, and large datasets
+description:
+globs:
+alwaysApply: true
+---
