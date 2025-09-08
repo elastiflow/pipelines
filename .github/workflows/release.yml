@@ -17,14 +17,17 @@ jobs:
       is_release: ${{ steps.release_or_pr.outputs.is_release }}
     steps:
       - id: release_or_pr
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           cat > /tmp/commit_message <<- EOF
-          ${{ github.event.head_commit.message }}
+          ${COMMIT_MESSAGE}
           EOF
           cat /tmp/commit_message
           # https://regex101.com/r/1z85UX/1
           echo $(grep -Pq '^\[release v(?:[0-9]{1,3}\.?){3}(?:-rc(?:\.[0-9]{1,3})?)?\] \(#[0-9]{1,5}\)$' /tmp/commit_message && echo true || echo false) > /tmp/is_release
           echo "is_release=$(cat /tmp/is_release)" >> $GITHUB_OUTPUT
+          cat /tmp/is_release
 
   release_pr_create:
     name: Release PR create
