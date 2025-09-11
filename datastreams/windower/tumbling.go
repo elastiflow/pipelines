@@ -102,7 +102,7 @@ func (p *tumblingPartition[T, K]) waitAndFlush() {
 
 	select {
 	case <-p.done:
-		p.timer = nil
+		p.timer.Stop()
 		p.flush()
 		p.windowSwitch.tryStop()
 		return
