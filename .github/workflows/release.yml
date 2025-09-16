@@ -44,7 +44,6 @@ jobs:
         id: prepare_release
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
-          branch: "${{ github.ref_name }}"
           changelog_update: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Create Pull Request
@@ -76,8 +75,7 @@ jobs:
         id: prepare_release
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
-          branch: "${{ github.ref_name }}"
-          changelog_update: true
+          add_git_notes: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Create and push semver tag
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
