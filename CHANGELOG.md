@@ -1,3 +1,10 @@
+## [0.0.13](https://github.com/elastiflow/pipelines/compare/v0.0.12...v0.0.13) (2025-09-18)
+
+### Bug Fixes
+
+* **ci:** Add PR title linting ([#42](https://github.com/elastiflow/pipelines/issues/42)) ([ca44929](https://github.com/elastiflow/pipelines/commit/ca44929b86ce8d26757eea5b2b4eaae7180a13e8))
+
+
 ## [0.0.12](https://github.com/elastiflow/pipelines/compare/v0.0.11...v0.0.12) (2025-09-16)
 
 ### Bug Fixes
