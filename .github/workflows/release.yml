@@ -40,12 +40,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Prepare Release
         id: prepare_release
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
           changelog_update: true
-          github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Create Pull Request
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
         uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
@@ -71,12 +72,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Prepare Release
         id: prepare_release
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
           add_git_notes: true
-          github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Create and push semver tag
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
         uses: anothrNick/github-tag-action@e528bc2b9628971ce0e6f823f3052d1dcd9d512c
