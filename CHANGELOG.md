@@ -1,3 +1,12 @@
+## [v0.0.13] - 2025-10-09
+
+### Bug Fixes
+
+- **ci:** Add PR title linting (#42)
+- **ci:** "fetch-depth" should be 0 for releases (#44)
+
+[v0.0.12..v0.0.13](https://github.com/elastiflow/pipelines/compare/v0.0.12...v0.0.13)
+
 ## [0.0.12](https://github.com/elastiflow/pipelines/compare/v0.0.11...v0.0.12) (2025-09-16)
 
 ### Bug Fixes
