@@ -162,6 +162,7 @@ func NewSliding[T any, K comparable](
 // that can be used to Push items into the buffer.
 func (s *Sliding[T, K]) Create(ctx context.Context, out chan<- []T) datastreams.Partition[T, K] {
 	p := &slidingPartition[T, K]{
+		ctx:            ctx,
 		out:            out,
 		WindowDuration: s.WindowDuration,
 		batch:          NewSlidingBatch[T](),
@@ -184,6 +185,7 @@ func (s *Sliding[T, K]) Close() {
 }
 
 type slidingPartition[T any, K comparable] struct {
+	ctx            context.Context
 	WindowDuration time.Duration
 	out            chan<- []T
 	batch          *SlidingBatch[T]
@@ -207,13 +209,22 @@ func (p *slidingPartition[T, K]) run() {
 		select {
 		case now := <-p.timer.C:
 			if window := p.batch.Next(p.WindowDuration, now, false); len(window) > 0 {
-				p.out <- window
+				select {
+				case p.out <- window:
+				case <-p.ctx.Done():
+					return
+				}
 			}
 			p.timer.Reset(p.interval)
 		case <-p.done:
 			p.timer.Stop()
+			// Flush final window on shutdown
 			if window := p.batch.Next(p.WindowDuration, time.Now(), true); len(window) > 0 {
-				p.out <- window
+				select {
+				case p.out <- window:
+				case <-p.ctx.Done():
+					// Context canceled, skip final flush
+				}
 			}
 			return
 		}

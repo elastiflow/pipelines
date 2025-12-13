@@ -227,9 +227,9 @@ func (p DataStream[T]) FanIn(
 		defer wg.Done()
 		for i := range c {
 			select {
+			case outSenders[0] <- i:
 			case <-p.ctx.Done():
 				return
-			case outSenders[0] <- i: // Hard coded to index 0 since FanIn only returns one channel
 			}
 		}
 	}
@@ -370,6 +370,7 @@ func (p DataStream[T]) Tee(
 				for i := 0; i < 2; i++ {
 					select {
 					case <-p.ctx.Done():
+						return
 					case ch1 <- val:
 						ch1 = nil
 					case ch2 <- val:
