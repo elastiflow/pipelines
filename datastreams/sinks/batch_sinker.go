@@ -2,6 +2,7 @@ package sinks
 
 import (
 	"context"
+	"sync"
 
 	"github.com/elastiflow/pipelines/datastreams"
 )
@@ -13,6 +14,7 @@ type BatchSinker[T any] struct {
 	onFlush func(context.Context, []T) error
 	batch   []T
 	errs    chan error
+	flushWg sync.WaitGroup // Tracks async flush operations
 }
 
 // NewBatchSinker creates and returns a new BatchSinker.
@@ -32,18 +34,31 @@ func NewBatchSinker[T any](onFlush func(context.Context, []T) error, batchSize i
 // Sink consumes items from a DataStream, adding them to an internal batch.
 // It flushes the batch asynchronously in a new goroutine whenever the batch
 // reaches its configured capacity. If the context is canceled, it performs
-// a final synchronous flush of any remaining items before returning.
+// a final synchronous flush of any remaining items and waits for all async
+// flushes to complete before returning.
 func (s *BatchSinker[T]) Sink(ctx context.Context, ds datastreams.DataStream[T]) error {
 	for {
 		select {
 		case <-ctx.Done():
-			// TryFlush any remaining items in the batch upon shutdown.
+			// Wait for all async flushes to complete before final flush
+			s.flushWg.Wait()
+			// Flush any remaining items in the batch upon shutdown.
 			s.flush(ctx, s.Next())
 			return nil
-		case val := <-ds.Out():
+		case val, ok := <-ds.Out():
+			if !ok {
+				// Channel closed, wait for pending flushes and flush remaining items
+				s.flushWg.Wait()
+				s.flush(ctx, s.Next())
+				return nil
+			}
 			s.batch = append(s.batch, val)
 			if len(s.batch) == cap(s.batch) {
-				go s.flush(ctx, s.Next())
+				s.flushWg.Add(1)
+				go func(batch []T) {
+					defer s.flushWg.Done()
+					s.flush(ctx, batch)
+				}(s.Next())
 			}
 		}
 	}

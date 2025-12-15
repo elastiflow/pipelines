@@ -72,10 +72,9 @@ func (k *EventSourcer[T]) Source(ctx context.Context, errSender chan<- error) da
 		defer close(out)
 		for msg := range k.consumer.Messages() {
 			select {
+			case out <- msg:
 			case <-ctx.Done():
 				return
-			default:
-				out <- msg
 			}
 		}
 	}(ctx, k.consumer.Messages(), out)

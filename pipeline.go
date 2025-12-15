@@ -304,9 +304,11 @@ func (p *Pipeline[T, U]) Broadcast(num int, streamFunc StreamFunc[T, U]) Pipelin
 //
 // This method helps ensure you process all items before shutting down. Once Wait
 // returns, the Pipeline is effectively drained.
+//
+// Note: Wait does NOT close the error channel. The error channel is user-provided
+// and should be managed by the caller.
 func (p *Pipeline[T, U]) Wait() {
 	p.wg.Wait() // Blocks until all goroutines managed by p.wg have returned
-	close(p.errorChan)
 }
 
 // Pipelines represents a collection of Pipeline instances, designed to simplify

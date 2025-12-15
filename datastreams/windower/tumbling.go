@@ -91,6 +91,8 @@ type tumblingPartition[T any, K comparable] struct {
 func (p *tumblingPartition[T, K]) Push(item datastreams.TimedKeyableElement[T, K]) {
 	p.batch.Push(item.Value())
 	if p.windowSwitch.tryStart() {
+		// Starting a new window - reset the timer to fire after windowDuration
+		p.timer.Reset(p.windowDuration)
 		p.wg.Add(1)
 		go p.waitAndFlush()
 	}
@@ -104,22 +106,26 @@ func (p *tumblingPartition[T, K]) waitAndFlush() {
 	case <-p.done:
 		p.timer.Stop()
 		p.flush()
-		p.windowSwitch.tryStop()
 		return
 	case <-p.timer.C:
 		if !p.windowSwitch.started.Load() {
 			return // No active window, nothing to flush
 		}
 		p.flush()
-		p.timer.Reset(p.windowDuration)
-		p.windowSwitch.tryStop()
+		// Don't reset timer here - this goroutine exits after flushing.
+		// A new window (and new waitAndFlush goroutine) will start on the next Push.
 	}
 
 }
 
 func (p *tumblingPartition[T, K]) flush() {
 	if batch := p.batch.Next(); len(batch) > 0 {
-		p.out <- batch
+		select {
+		case p.out <- batch:
+		case <-p.ctx.Done():
+			// Context canceled - stop trying to send
+			return
+		}
 	}
 }
 
