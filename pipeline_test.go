@@ -861,9 +861,8 @@ func TestIntegrationPipeline_Wait(t *testing.T) {
 				assert.ElementsMatch(t, tt.wantOutput, gotOutput)
 			}
 
-			// Verify the pipeline's error channel has been closed
-			_, open := <-errChan
-			assert.False(t, open, "errorChan should be closed after Wait returns")
+			// Note: The error channel is user-provided and not closed by Wait().
+			// We verify Wait() completed by checking it returned within the timeout above.
 		})
 	}
 }
