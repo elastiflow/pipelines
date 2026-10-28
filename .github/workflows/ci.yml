@@ -22,10 +22,6 @@ jobs:
   go_checks:
     name: Go checks
     uses: elastiflow/gha-reusable/.github/workflows/reusable_go_checks.yml@v0
-    with:
-      unit_test_cmd: make test-unit
-      unit_test_report_coverage_cmd: make test-unit-enforce-coverage
-      go_version_file: "go.mod"
 
   integration_tests:
     name: Integration tests

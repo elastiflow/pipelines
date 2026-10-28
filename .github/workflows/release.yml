@@ -42,9 +42,10 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: true
       - name: Prepare Release
         id: prepare_release
-        uses: elastiflow/gha-reusable/actions/prepare-release@v0
+        uses: elastiflow/gha-reusable/actions/prepare-release@675734d0bac28710427ca69c844bd8fc0ff86244 # v0
         with:
           changelog_update: true
       - name: Create Pull Request
@@ -74,9 +75,10 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: true
       - name: Prepare Release
         id: prepare_release
-        uses: elastiflow/gha-reusable/actions/prepare-release@v0
+        uses: elastiflow/gha-reusable/actions/prepare-release@675734d0bac28710427ca69c844bd8fc0ff86244 # v0
         with:
           add_git_notes: true
       - name: Create and push semver tag
