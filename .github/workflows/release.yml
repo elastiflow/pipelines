@@ -45,7 +45,7 @@ jobs:
           persist-credentials: true
       - name: Prepare Release
         id: prepare_release
-        uses: elastiflow/gha-reusable/actions/prepare-release@675734d0bac28710427ca69c844bd8fc0ff86244 # v0
+        uses: elastiflow/gha-reusable/actions/prepare-release@43fa3affc9b6ffd89b23fc948293bedb0f1f560c # v0
         with:
           changelog_update: true
       - name: Create Pull Request
@@ -78,7 +78,7 @@ jobs:
           persist-credentials: true
       - name: Prepare Release
         id: prepare_release
-        uses: elastiflow/gha-reusable/actions/prepare-release@675734d0bac28710427ca69c844bd8fc0ff86244 # v0
+        uses: elastiflow/gha-reusable/actions/prepare-release@43fa3affc9b6ffd89b23fc948293bedb0f1f560c # v0
         with:
           add_git_notes: true
       - name: Create and push semver tag
