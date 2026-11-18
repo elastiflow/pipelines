@@ -1,5 +1,7 @@
 {
-  "dependencyDashboard": true,
+  "dependencyDashboard": {
+    "enabled": true
+  },
   "automerge": false,
   "extends": [
     "config:recommended"
